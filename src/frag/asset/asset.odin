@@ -8,6 +8,7 @@ import "core:runtime"
 
 Asset_Manager :: struct {
   name: string,
+  name_hash: u32,
   callbacks: frag.Asset_Callbacks,
 }
 
@@ -23,10 +24,6 @@ register_asset_type :: proc "c" (name: string, callbacks: frag.Asset_Callbacks) 
 
   name_hash := hash.fnv32a(transmute([]u8)name)
 
-  // for i := 0; i < len(ctx.assetManagers); i += 1 {
-	//   if name_hash == ctx.assetManagers[i]
-  // }
-
   for asset_name_hash in ctx.asset_name_hashes {
     if name_hash == asset_name_hash {
       assert(false, fmt.tprintf("asset with name: %s - already registered", name))
@@ -34,6 +31,11 @@ register_asset_type :: proc "c" (name: string, callbacks: frag.Asset_Callbacks) 
     }
   }
 
+  append(&ctx.asset_managers, Asset_Manager{
+    name = name,
+    name_hash = name_hash,
+    callbacks = callbacks,
+  })
   append(&ctx.asset_name_hashes, name_hash)
 }
 
