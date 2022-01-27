@@ -39,6 +39,7 @@ init_callback :: proc "c" () {
 }
 
 frame_callback :: proc "c" () {
+	
 }
 
 event_callback :: proc "c" (event: ^sokol.Event) {
