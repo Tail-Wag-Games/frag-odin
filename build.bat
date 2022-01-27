@@ -4,5 +4,5 @@ if exist ".\vendor\sokol\sokol_app\sokol_app_d3d11.lib" if exist ".\vendor\sokol
 :DEPS
 call .\vendor\sokol\build.bat
 :CONTINUE
-odin build src/main.odin -collection:frag="%cd%\..\frag\src\" -out:frag.exe
+odin build src/main.odin -out:frag.exe
 frag %*
