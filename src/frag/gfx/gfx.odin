@@ -1,9 +1,9 @@
 package gfx
 
-import sgfx "../../../vendor/sokol/sokol_gfx"
+import "../../../vendor/sokol"
 
 import "core:fmt"
 
-init :: proc(gfx_desc: ^sgfx.Desc) {
-  fmt.println("Inside gfx init!")
+init :: proc(desc: ^sokol.Gfx_Desc) {
+  sokol.sg_setup(desc)
 }

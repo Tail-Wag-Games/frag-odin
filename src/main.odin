@@ -1,6 +1,6 @@
 package main
 
-import sapp "../vendor/sokol/sokol_app"
+import "../vendor/sokol"
 
 import "frag"
 import "frag/core"
@@ -41,14 +41,14 @@ init_callback :: proc "c" () {
 frame_callback :: proc "c" () {
 }
 
-event_callback :: proc "c" (event: ^sapp.Event) {
+event_callback :: proc "c" (event: ^sokol.Event) {
 	if event.type == .KEY_DOWN && !event.key_repeat {
 		#partial switch event.key_code {
 		case .ESCAPE:
-			sapp.request_quit()
+			sokol.request_quit()
 		case .Q:
 			if .CTRL in event.modifiers {
-				sapp.request_quit()
+				sokol.request_quit()
 			}
 		}
 	}
@@ -130,7 +130,7 @@ main :: proc() {
 	conf := frag.Config{}
 	fn(&conf)
 	
-	err := sapp.run({
+	err := sokol.run({
 		init_cb      = init_callback,
 		frame_cb     = frame_callback,
 		cleanup_cb   = proc "c" () { },

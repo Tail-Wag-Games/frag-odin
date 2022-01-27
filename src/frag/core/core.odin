@@ -1,12 +1,13 @@
 package core
 
-import sgfx "../../../vendor/sokol/sokol_gfx"
-import sglue "../../../vendor/sokol/sokol_glue"
+import "../../../vendor/sokol"
 
 import ".."
 import "../gfx"
 
 init :: proc(conf: ^frag.Config) -> frag.Error {
-  gfx.init(&sgfx.Desc{})
+  gfx.init(&sokol.Gfx_Desc{
+    ctx = sokol.sapp_sgcontext(),
+  })
   return .None
 }
