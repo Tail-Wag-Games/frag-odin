@@ -12,7 +12,7 @@ import "core:runtime"
 import "core:strings"
 import "core:sys/win32"
 
-AppContext :: struct {
+App_Context :: struct {
 	conf: frag.Config,
 }
 
@@ -20,7 +20,7 @@ Command :: distinct string
 
 run : Command : "run"
 
-ctx := AppContext{}
+ctx := App_Context{}
 
 dlerr :: proc() -> string {
   when ODIN_OS == "windows" {
@@ -39,7 +39,7 @@ init_callback :: proc "c" () {
 }
 
 frame_callback :: proc "c" () {
-	
+
 }
 
 event_callback :: proc "c" (event: ^sokol.Event) {

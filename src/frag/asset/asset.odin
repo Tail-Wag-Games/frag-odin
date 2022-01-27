@@ -12,14 +12,29 @@ Asset_Manager :: struct {
 }
 
 Asset_Context :: struct {
-  assetManagers: [dynamic]Asset_Manager,
-  assetNameHashes: [dynamic]u32,
+  asset_managers: [dynamic]Asset_Manager,
+  asset_name_hashes: [dynamic]u32,
 }
+
+ctx := Asset_Context{}
 
 register_asset_type :: proc "c" (name: string, callbacks: frag.Asset_Callbacks) {
   context = runtime.default_context()
-  
+
   name_hash := hash.fnv32a(transmute([]u8)name)
+
+  // for i := 0; i < len(ctx.assetManagers); i += 1 {
+	//   if name_hash == ctx.assetManagers[i]
+  // }
+
+  for asset_name_hash in ctx.asset_name_hashes {
+    if name_hash == asset_name_hash {
+      assert(false, fmt.tprintf("asset with name: %s - already registered", name))
+      return
+    }
+  }
+
+  append(&ctx.asset_name_hashes, name_hash)
 }
 
 @(init)
