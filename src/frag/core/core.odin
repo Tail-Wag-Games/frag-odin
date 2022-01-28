@@ -14,7 +14,7 @@ Core_Context :: struct {
 ctx : Core_Context
 
 init :: proc(conf: ^frag.Config) -> frag.Error {
-  ctx.job_ctx = job.create_job_context({}) or_return
+  ctx.job_ctx = job.create_job_context(&job.Job_Context_Desc{}) or_return
 
   asset.init()
 
