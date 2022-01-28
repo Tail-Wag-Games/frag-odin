@@ -1,6 +1,7 @@
 package asset
 
 import ".."
+import "../internal"
 
 import "core:fmt"
 import "core:hash"
@@ -39,9 +40,13 @@ register_asset_type :: proc "c" (name: string, callbacks: frag.Asset_Callbacks) 
   append(&ctx.asset_name_hashes, name_hash)
 }
 
+init :: proc() {
+
+}
+
 @(init)
-init_api :: proc() {
-  frag.asset_api = frag.Asset_API{
+init_asset_api :: proc() {
+  internal.asset_api = frag.Asset_API{
     register_asset_type = register_asset_type,
   }
 }
