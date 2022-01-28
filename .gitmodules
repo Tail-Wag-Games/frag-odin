@@ -1,3 +1,6 @@
 [submodule "vendor/sokol"]
 	path = vendor/sokol
 	url = git@github.com:Tail-Wag-Games/sokol.git
+[submodule "vendor/deboost.context"]
+	path = vendor/deboost.context
+	url = git@github.com:Tail-Wag-Games/deboost.context.git
