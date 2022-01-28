@@ -9,6 +9,10 @@ import "core:runtime"
 import "core:sync"
 import "core:thread"
 
+Job :: struct {
+  job_index: int,
+}
+
 Job_Context_Desc :: struct {
   num_threads: int,
   max_fibers: int,
@@ -18,6 +22,8 @@ Job_Context_Desc :: struct {
 Job_Context :: struct {
   threads: []^thread.Thread,
   stack_size: int,
+  job_pool: ^linchpin.Pool,
+  counter_pool: ^linchpin.Pool,
   thread_tls: linchpin.TLS,
   sem: sync.Semaphore,
 }
@@ -40,11 +46,17 @@ create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: 
 
   sync.semaphore_init(&ctx.sem)
 
+  ctx.job_pool = linchpin.create_pool(size_of(Job), DEFAULT_MAX_FIBERS) or_return
+
   return ctx, .None
 }
 
 destroy_job_context :: proc(ctx: ^Job_Context) {
   delete(ctx.threads)
-  
+
+  linchpin.destroy_pool(ctx.job_pool)
+  linchpin.destroy_pool(ctx.counter_pool)
+  sync.semaphore_destroy(&ctx.sem)
+
   free(ctx)
 }
