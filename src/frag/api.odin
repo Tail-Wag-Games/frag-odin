@@ -2,8 +2,10 @@ package frag
 
 import "mfio"
 
-Error :: enum {
-	None,
+import "core:runtime"
+
+Error :: union {
+	runtime.Allocator_Error,
 };
 
 Asset_Obj :: union {
