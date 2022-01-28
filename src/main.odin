@@ -42,6 +42,12 @@ frame_callback :: proc "c" () {
 
 }
 
+cleanup_callback :: proc "c" () {
+	context = runtime.default_context()
+
+	core.shutdown()
+}
+
 event_callback :: proc "c" (event: ^sokol.Event) {
 	if event.type == .KEY_DOWN && !event.key_repeat {
 		#partial switch event.key_code {
@@ -134,7 +140,7 @@ main :: proc() {
 	err := sokol.run({
 		init_cb      = init_callback,
 		frame_cb     = frame_callback,
-		cleanup_cb   = proc "c" () { },
+		cleanup_cb   = cleanup_callback,
 		event_cb     = event_callback,
 		width        = auto_cast conf.window_width,
 		height       = auto_cast conf.window_height,

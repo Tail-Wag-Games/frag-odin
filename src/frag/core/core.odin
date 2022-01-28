@@ -23,3 +23,7 @@ init :: proc(conf: ^frag.Config) -> frag.Error {
   })
   return .None
 }
+
+shutdown :: proc() {
+  job.destroy_job_context(ctx.job_ctx)
+}

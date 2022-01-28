@@ -16,7 +16,7 @@ Job_Context_Desc :: struct {
 }
 
 Job_Context :: struct {
-  threads: [dynamic]^thread.Thread,
+  threads: []^thread.Thread,
   stack_size: int,
   thread_tls: linchpin.TLS,
   sem: sync.Semaphore,
@@ -34,8 +34,7 @@ create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: 
     return {}, .Out_Of_Memory 
   }
 
-  // runtime.reserve(&ctx.threads, desc.num_threads > 0 ? desc.num_threads : (linchpin.num_cores() - 1))
-  runtime.resize(&ctx.threads, desc.num_threads > 0 ? desc.num_threads : (linchpin.num_cores() - 1))
+  ctx.threads = make([]^thread.Thread, desc.num_threads > 0 ? desc.num_threads : (linchpin.num_cores() - 1))
   ctx.thread_tls = linchpin.tls_create()
   ctx.stack_size = desc.fiber_stack_size > 0 ? desc.fiber_stack_size : DEFAULT_FIBER_STACK_SIZE
 
@@ -45,5 +44,7 @@ create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: 
 }
 
 destroy_job_context :: proc(ctx: ^Job_Context) {
+  delete(ctx.threads)
+  
   free(ctx)
 }
