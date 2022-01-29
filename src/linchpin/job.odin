@@ -1,10 +1,10 @@
 package linchpin
 
 import fcontext "../../vendor/deboost.context"
+import lockless "../../vendor/c89atomic"
 
 import "core:fmt"
 import "core:sync"
-import "core:sync/sync2"
 import "core:thread"
 import "core:runtime"
 
@@ -71,8 +71,8 @@ Job_Context :: struct {
   counter_pool: ^Pool,
   waiting_list: [Job_Priority.Count]^Job,
   waiting_list_last: [Job_Priority.Count]^Job,
-  job_lock: sync2.Atomic_Mutex,
-  counter_lock: sync2.Atomic_Mutex,
+  job_lock: lockless.Spinlock,
+  counter_lock: lockless.Spinlock,
   sem: sync.Semaphore,
   quit: bool,
   thread_init_cb: Job_Thread_Init_Callback,
@@ -107,7 +107,9 @@ remove_job_from_list :: proc(pfirst: ^^Job, plast: ^^Job, node: ^Job) {
 select_job :: proc(ctx: ^Job_Context, tid: int) -> (res: Selected_Job) {
   res = Selected_Job{}
 
-  sync2.atomic_mutex_lock(&ctx.job_lock)
+  fmt.println("About to enter lock!")
+  lockless.lock_enter(&ctx.job_lock)
+  fmt.println("Inside lock!")
   priority := 0
   for priority < int(Job_Priority.Count) {
     node := ctx.waiting_list[priority]
@@ -124,8 +126,8 @@ select_job :: proc(ctx: ^Job_Context, tid: int) -> (res: Selected_Job) {
       node = node.next
     }
   }
-  sync2.atomic_mutex_unlock(&ctx.job_lock)
-
+  lockless.lock_exit(&ctx.job_lock)
+  fmt.println("Outside lock!")
   return
 }
 
@@ -191,9 +193,6 @@ job_thread_fn :: proc(ctx: ^Job_Context, index: int) {
 
 create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: Error = .None) {
   res = new(Job_Context) or_return
-
-  fmt.println(size_of(res.job_lock))
-  fmt.println(align_of(res.job_lock))
 
   res.stack_size = desc.fiber_stack_size > 0 ? desc.fiber_stack_size : DEFAULT_FIBER_STACK_SIZE
   res.thread_init_cb = desc.thread_init_cb
