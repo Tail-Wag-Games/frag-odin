@@ -7,6 +7,7 @@ import "../../linchpin"
 import ".."
 import "../asset"
 import "../gfx"
+import "../vfs"
 
 import "core:fmt"
 
@@ -17,6 +18,8 @@ Core_Context :: struct {
 ctx : Core_Context
 
 init :: proc(conf: ^frag.Config) -> linchpin.Error {
+  vfs.init() or_return
+
   ctx.job_ctx = linchpin.create_job_context(&linchpin.Job_Context_Desc{
     num_threads = linchpin.num_cores() - 1,
     max_fibers = 64,

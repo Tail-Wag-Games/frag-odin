@@ -5,14 +5,14 @@ import "core:mem"
 
 import "core:c"
 
-Pool_Page :: struct #align 16 {
+Pool_Page :: struct {
   ptrs: []rawptr,
   buff: []u8,
   next: ^Pool_Page,
   iter: int,
 }
 
-Pool :: struct #align 16 {
+Pool :: struct {
   item_size: int,
   capacity: int,
   pages: ^Pool_Page,
@@ -42,15 +42,15 @@ delete_from_pool :: proc(pool: ^Pool, ptr: rawptr) {
   assert(false, "pointer does not belong to pool")
 }
 
-create_pool :: proc(item_size: int, capacity: int) -> (res: ^Pool, err: mem.Allocator_Error = .None) {
+create_pool :: proc(item_size: int, capacity: int) -> (res: ^Pool, err: mem.Allocator_Error = nil) {
   assert(item_size > 0, "item size must be > 0")
 
   aligned_capacity := align_mask(capacity, 15)
   
-  res = new(Pool)
+  res = mem.new_aligned(Pool, 16) or_return
   res.item_size = item_size
   res.capacity = aligned_capacity
-  res.pages = new(Pool_Page)
+  res.pages = mem.new_aligned(Pool_Page, 16) or_return
 
   page := res.pages
   page.iter = aligned_capacity
@@ -61,7 +61,7 @@ create_pool :: proc(item_size: int, capacity: int) -> (res: ^Pool, err: mem.Allo
     page.ptrs[aligned_capacity - i - 1] = &page.buff[i * item_size]
   }
   
-  return
+  return res, nil
 }
 
 destroy_pool :: proc(pool: ^Pool) {

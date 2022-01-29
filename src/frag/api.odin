@@ -1,6 +1,6 @@
 package frag
 
-import "mfio"
+import "../linchpin"
 
 import "core:runtime"
 
@@ -21,9 +21,9 @@ Asset_Load_Data :: struct {
 }
 
 Asset_Callbacks :: struct {
-	on_prepare: proc "c" (params: ^Asset_Load_Params, mem: ^mfio.Mem_Block),
-	on_load: proc "c" (data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^mfio.Mem_Block),
-	on_finalize: proc "c" (data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^mfio.Mem_Block),
+	on_prepare: proc "c" (params: ^Asset_Load_Params, mem: ^linchpin.Mem_Block),
+	on_load: proc "c" (data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^linchpin.Mem_Block),
+	on_finalize: proc "c" (data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^linchpin.Mem_Block),
 	on_reload: proc "c" (handle: Asset_Handle, prev_obj: Asset_Obj),
 	on_release: proc "c" (obj: Asset_Obj),
 }
