@@ -4,3 +4,6 @@
 [submodule "vendor/deboost.context"]
 	path = vendor/deboost.context
 	url = git@github.com:Tail-Wag-Games/deboost.context.git
+[submodule "vendor/c89atomic"]
+	path = vendor/c89atomic
+	url = git@github.com:Tail-Wag-Games/c89atomic.git
