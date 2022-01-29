@@ -2,13 +2,15 @@ package vfs
 
 import "../../linchpin"
 
+import "core:os"
+import "core:path/filepath"
 import "core:sync"
 import "core:thread"
 
-Async_Read_Callback :: proc "c" (path: string, mem: ^linchpin.Mem_Block, user_data: rawptr)
-Async_Write_Callback :: proc "c" (path: string, bytes_written: int, mem: ^linchpin.Mem_Block, user_data: rawptr)
+VFS_Async_Read_Callback :: proc "c" (path: string, mem: ^linchpin.Mem_Block, user_data: rawptr)
+VFS_Async_Write_Callback :: proc "c" (path: string, bytes_written: int, mem: ^linchpin.Mem_Block, user_data: rawptr)
 
-Modify_Async_Callback :: proc "c" (path: string)
+VFS_Modify_Async_Callback :: proc "c" (path: string)
 
 VFS_Async_Command :: enum {
   Read,
@@ -31,27 +33,27 @@ VFS_Flag :: enum {
 
 VFS_Flags :: bit_set[VFS_Flag]
 
-Async_Request :: struct {
+VFS_Async_Request :: struct {
   command: VFS_Async_Command,
   flags: VFS_Flags,
   path: string,
   write_mem: ^linchpin.Mem_Block,
   using rw: struct #raw_union {
-    read_fn: Async_Read_Callback,
-    write_fn: Async_Write_Callback,
+    read_fn: VFS_Async_Read_Callback,
+    write_fn: VFS_Async_Write_Callback,
   },
   user_data: rawptr,
 }
 
-Async_Response :: struct {
+VFS_Async_Response :: struct {
   code: VFS_Response_Code,
   using rw_mem: struct #raw_union {
     read_mem: ^linchpin.Mem_Block,
     write_mem: ^linchpin.Mem_Block,
   },
   using rw_cb: struct #raw_union {
-    read_fn: Async_Read_Callback,
-    write_fn: Async_Write_Callback,
+    read_fn: VFS_Async_Read_Callback,
+    write_fn: VFS_Async_Write_Callback,
   },
   user_data: rawptr,
   bytes_written: int,
@@ -66,7 +68,7 @@ VFS_Mount_Point :: struct {
 
 VFS_Context :: struct {
   mounts: []VFS_Mount_Point,
-  modify_cbs: []Modify_Async_Callback,
+  modify_cbs: []VFS_Modify_Async_Callback,
   worker_thread: ^thread.Thread,
   req_queue: ^linchpin.SPSC_Queue,
   res_queue: ^linchpin.SPSC_Queue,
@@ -77,18 +79,65 @@ VFS_Context :: struct {
 
 ctx : VFS_Context
 
+load_text_file :: proc(path: string) -> (^linchpin.Mem_Block, bool) {  
+  return nil, false
+}
+
+load_binary_file :: proc(path: string) -> (^linchpin.Mem_Block, bool) {
+  return nil, false
+}
+
+resolve_path :: proc(path: string, flags: VFS_Flags) -> (res: string, resolved: bool = false) {
+  if .Absolute_Path in flags {
+    return filepath.clean(path), true
+  } else {
+    for mp in &ctx.mounts {
+      if path == mp.alias {
+        return filepath.join(mp.path, filepath.clean(path[len(mp.alias):])), true
+      }
+    }
+    res = filepath.clean(path)
+    return res, os.exists(res)
+  }
+  return "", false
+}
+
+read :: proc(path: string, flags: VFS_Flags) -> (res: ^linchpin.Mem_Block, read: bool = false) {
+  resolved_path := resolve_path(path, flags) or_return
+  if .Text_File in flags {
+    return load_text_file(resolved_path) or_return, true
+   } else {
+     return load_binary_file(resolved_path) or_return, true
+   } 
+}
+
 worker_thread_fn :: proc(_: ^thread.Thread) {
   for !ctx.quit {
-    req : Async_Request
+    req : VFS_Async_Request
     if linchpin.consume_from_spsc_queue(ctx.res_queue, &req) {
+      res := VFS_Async_Response{bytes_written = -1}
+      res.path = req.path
+      res.user_data = req.user_data
 
+      switch req.command {
+        case .Read:
+          res.read_fn = req.read_fn
+          mem, read := read(req.path, req.flags); if read {
+            res.code = .Read_Ok
+            res.read_mem = mem
+          } else {
+            res.code = .Read_Failed
+          }
+        case .Write:
+          res.write_fn = req.write_fn
+      }
     }
   }
 }
 
 init :: proc() -> (err: linchpin.Error = nil) {
-  ctx.req_queue = linchpin.create_spsc_queue(size_of(Async_Request), 128) or_return
-  ctx.res_queue = linchpin.create_spsc_queue(size_of(Async_Response), 128) or_return
+  ctx.req_queue = linchpin.create_spsc_queue(size_of(VFS_Async_Request), 128) or_return
+  ctx.res_queue = linchpin.create_spsc_queue(size_of(VFS_Async_Response), 128) or_return
 
   sync.semaphore_init(&ctx.worker_sem)
   ctx.worker_thread = thread.create_and_start(worker_thread_fn)

@@ -3,6 +3,7 @@ package linchpin
 import lockless "../../vendor/c89atomic"
 
 import "core:mem"
+import "core:runtime"
 
 SPSC_Queue_Node :: struct {
   next: ^SPSC_Queue_Node,
@@ -62,8 +63,13 @@ create_spsc_queue :: proc(item_size: int, capacity: int) -> (res: ^SPSC_Queue, e
 }
 
 consume_from_spsc_queue :: proc(queue: ^SPSC_Queue, data: rawptr) -> bool {
-  if queue.divider != lockless.atomic_load64_explicit(&queue.last, lockless.Atomic_Memory_Order.Acquire) {
+  if queue.divider != lockless.atomic_loadptr_explicit(&queue.last, lockless.Atomic_Memory_Order.Acquire) {
+    divider := cast(^SPSC_Queue_Node)uintptr(queue.divider)
+    assert(divider.next != nil)
+    runtime.mem_copy(data, mem.ptr_offset(divider.next, 1), queue.stride)
 
+    lockless.atomic_storeptr_explicit(&queue.divider, u64(uintptr(divider.next)), lockless.Atomic_Memory_Order.Release)
+    return true
   }
 
   return false
