@@ -12,7 +12,7 @@ if exist ".\vendor\c89atomic\lockless.lib" if exist ".\vendor\c89atomic\lockless
 :LOCKLESS_BUILD
 call .\vendor\c89atomic\build.bat
 :LOCKLESS_CONTINUE
-call odin build src/main.odin -out:frag.exe
+call odin build src/main.odin -debug -out:frag.exe
 if %ERRORLEVEL% == 0 goto :FRAG_BUILD
 goto :EOF
 :FRAG_BUILD

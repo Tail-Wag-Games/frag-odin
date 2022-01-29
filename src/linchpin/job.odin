@@ -12,7 +12,7 @@ Job_Callback :: proc "c" (range_start: int, range_end: int, thread_index: int, u
 Job_Thread_Init_Callback :: proc "c" (ctx: ^Job_Context, thread_index: int, thread_id: int, user_data: rawptr)
 Job_Thread_Shutdown_Callback :: proc "c" (ctx: ^Job_Context, thread_index: int, thread_id: int, user_data: rawptr)
 
-Job_Handle :: distinct ^u32
+Job_Handle :: ^u32
 
 Job_Priority :: enum {
   High,
@@ -87,6 +87,13 @@ DEFAULT_FIBER_STACK_SIZE :: 1048576    // 1MB
 @(private, thread_local)
 tl_thread_data: ^Job_Thread_Data
 
+delete_job :: proc(ctx: ^Job_Context, job: ^Job) {
+  lockless.lock_enter(&ctx.job_lock)
+  defer lockless.lock_exit(&ctx.job_lock)
+
+  delete_from_pool(ctx.job_pool, job)
+}
+
 remove_job_from_list :: proc(pfirst: ^^Job, plast: ^^Job, node: ^Job) {
   if node.prev != nil {
     node.prev.next = node.next
@@ -107,11 +114,10 @@ remove_job_from_list :: proc(pfirst: ^^Job, plast: ^^Job, node: ^Job) {
 select_job :: proc(ctx: ^Job_Context, tid: int) -> (res: Selected_Job) {
   res = Selected_Job{}
 
-  fmt.println("About to enter lock!")
+
   lockless.lock_enter(&ctx.job_lock)
-  fmt.println("Inside lock!")
   priority := 0
-  for priority < int(Job_Priority.Count) {
+  for ; priority < int(Job_Priority.Count); priority += 1 {
     node := ctx.waiting_list[priority]
     for node != nil {
       res.waiting_list_alive = true
@@ -127,8 +133,7 @@ select_job :: proc(ctx: ^Job_Context, tid: int) -> (res: Selected_Job) {
     }
   }
   lockless.lock_exit(&ctx.job_lock)
-  fmt.println("Outside lock!")
-  return
+  return res
 }
 
 job_selector_fn :: proc "c" (transfer: fcontext.FContext_Transfer) {
@@ -141,12 +146,56 @@ job_selector_fn :: proc "c" (transfer: fcontext.FContext_Transfer) {
     sync.semaphore_wait_for(&ctx.sem)
 
     j := select_job(ctx, tl_thread_data.tid)
+
+    if j.job != nil {
+      if j.job.owner_tid > 0 {
+        assert(tl_thread_data.current_job == nil)
+        j.job.owner_tid = 0
+      }
+
+      tl_thread_data.selector_fiber = j.job.selector_fiber
+      tl_thread_data.current_job = j.job
+      j.job.fiber = fcontext.jump_fcontext(j.job.fiber, j.job).ctx
+
+      if j.job.done {
+        tl_thread_data.current_job = nil
+        lockless.atomic_fetch_sub32(j.job.counter, 1)
+        delete_job(ctx, j.job)
+      }
+    } else if j.waiting_list_alive {
+      sync.semaphore_post(&ctx.sem, 1)
+      lockless.relax_cpu()
+    }
   }
 
   fcontext.jump_fcontext(transfer.ctx, transfer.data)
 }
 
 main_thread_job_selector :: proc "c" (transfer: fcontext.FContext_Transfer) {
+  context = runtime.default_context()
+
+  ctx := cast(^Job_Context)transfer.data
+  assert(tl_thread_data != nil)
+
+  j := select_job(ctx, tl_thread_data.tid)
+
+  if j.job != nil {
+    if j.job.owner_tid > 0 {
+      assert(tl_thread_data.current_job == nil)
+      j.job.owner_tid = 0
+    }
+
+    tl_thread_data.selector_fiber = j.job.selector_fiber
+    tl_thread_data.current_job = j.job
+    j.job.fiber = fcontext.jump_fcontext(j.job.fiber, j.job).ctx
+
+    if j.job.done {
+      tl_thread_data.current_job = nil
+      lockless.atomic_fetch_sub32(j.job.counter, 1)
+      delete_job(ctx, j.job)
+    }
+  }
+
   tl_thread_data.selector_fiber = nil
   fcontext.jump_fcontext(transfer.ctx, transfer.data)
 }
@@ -156,7 +205,7 @@ destroy_job_tdata :: proc(tdata: ^Job_Thread_Data) {
   free(tdata)
 }
 
-create_job_tdata :: proc(tid: int, index: int, main_thread: bool) -> (res: ^Job_Thread_Data, err: Error = .None) {
+create_job_tdata :: proc(tid: int, index: int, main_thread: bool) -> (res: ^Job_Thread_Data, err: Error) {
   res = new(Job_Thread_Data) or_return
 
   res.thread_index = index
@@ -165,14 +214,14 @@ create_job_tdata :: proc(tid: int, index: int, main_thread: bool) -> (res: ^Job_
 
   res.selector_stack = fcontext.create_fcontext_stack(MIN_STACK_SIZE)
 
-  return
+  return res, nil
 }
 
 job_thread_fn :: proc(ctx: ^Job_Context, index: int) {
   thread_id := sync.current_thread_id()
 
   td, err := create_job_tdata(thread_id, index + 1, false)
-  if err != .None {
+  if err != nil {
     return
   }
   tl_thread_data = td
@@ -191,19 +240,20 @@ job_thread_fn :: proc(ctx: ^Job_Context, index: int) {
   }
 }
 
-create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: Error = .None) {
+create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: Error) {
   res = new(Job_Context) or_return
 
   res.stack_size = desc.fiber_stack_size > 0 ? desc.fiber_stack_size : DEFAULT_FIBER_STACK_SIZE
   res.thread_init_cb = desc.thread_init_cb
   res.thread_shutdown_cb = desc.thread_shutdown_cb
   res.thread_user_data = desc.thread_user_data
-
   max_fibers := desc.max_fibers > 0 ? desc.max_fibers : DEFAULT_MAX_FIBERS
 
-  if tl_thread_data, err = create_job_tdata(sync.current_thread_id(), 0, true); err != .None {
+  sync.semaphore_init(&res.sem)
+
+  if tl_thread_data, err = create_job_tdata(sync.current_thread_id(), 0, true); err != nil {
     free(res)
-    return
+    return {}, err
   }
   tl_thread_data.selector_fiber = fcontext.make_fcontext(tl_thread_data.selector_stack.sptr, tl_thread_data.selector_stack.ssize, main_thread_job_selector)
 
@@ -219,7 +269,7 @@ create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: 
     }
   }
 
-  return
+  return res, nil
 }
 
 destroy_job_context :: proc(ctx: ^Job_Context) {

@@ -4,10 +4,6 @@ import "mfio"
 
 import "core:runtime"
 
-Error :: union {
-	runtime.Allocator_Error,
-};
-
 Asset_Obj :: union {
 	uintptr,
 	rawptr,

@@ -39,7 +39,7 @@ init_callback :: proc "c" () {
 }
 
 frame_callback :: proc "c" () {
-
+	context = runtime.default_context()
 }
 
 cleanup_callback :: proc "c" () {

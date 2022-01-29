@@ -22,6 +22,26 @@ align_mask :: proc(value: int, mask: int) -> int {
   return ((value + mask) & (~int(0) & ~mask))
 }
 
+delete_from_pool :: proc(pool: ^Pool, ptr: rawptr) {
+  uptr := uintptr(ptr)
+  page := pool.pages
+  
+  for page != nil {
+    if uptr >= uintptr(page.buff[0]) &&
+       uptr < uintptr(page.buff[pool.capacity * pool.item_size]) {
+        assert(uintptr(mem.ptr_sub(cast(^u8)ptr, &page.buff[0])) % uintptr(pool.item_size) == 0, "pointer is not aligned to pool's items - probably invalid")
+        assert(page.iter != pool.capacity, "cannot delete any more objectgs, possible double delete")
+
+        page.ptrs[page.iter] = ptr
+        page.iter += 1
+        return
+    }
+
+    page = page.next
+  }
+  assert(false, "pointer does not belong to pool")
+}
+
 create_pool :: proc(item_size: int, capacity: int) -> (res: ^Pool, err: mem.Allocator_Error = .None) {
   assert(item_size > 0, "item size must be > 0")
 
