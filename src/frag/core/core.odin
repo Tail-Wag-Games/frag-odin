@@ -2,19 +2,20 @@ package core
 
 import "../../../vendor/sokol"
 
+import "../../linchpin"
+
 import ".."
 import "../asset"
 import "../gfx"
-import "../job"
 
 Core_Context :: struct {
-  job_ctx: ^job.Job_Context,
+  job_ctx: ^linchpin.Job_Context,
 }
 
 ctx : Core_Context
 
-init :: proc(conf: ^frag.Config) -> frag.Error {
-  ctx.job_ctx = job.create_job_context(&job.Job_Context_Desc{}) or_return
+init :: proc(conf: ^frag.Config) -> linchpin.Error {
+  ctx.job_ctx = linchpin.create_job_context(&linchpin.Job_Context_Desc{}) or_return
 
   asset.init()
 
@@ -25,5 +26,5 @@ init :: proc(conf: ^frag.Config) -> frag.Error {
 }
 
 shutdown :: proc() {
-  job.destroy_job_context(ctx.job_ctx)
+  linchpin.destroy_job_context(ctx.job_ctx)
 }

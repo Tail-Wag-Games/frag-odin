@@ -8,5 +8,9 @@ if exist ".\vendor\deboost.context\fcontext.lib" if exist ".\vendor\deboost.cont
 :FCONTEXT_BUILD
 call .\vendor\deboost.context\build.bat
 :FCONTEXT_CONTINUE
-odin build src/main.odin -out:frag.exe
+call odin build src/main.odin -out:frag.exe
+if %ERRORLEVEL% == 0 goto :FRAG_BUILD
+goto :EOF
+:FRAG_BUILD
 frag %*
+:EOF

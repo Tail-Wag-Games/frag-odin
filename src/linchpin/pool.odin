@@ -22,17 +22,17 @@ align_mask :: proc(value: int, mask: int) -> int {
   return ((value + mask) & (~int(0) & ~mask))
 }
 
-create_pool :: proc(item_size: int, capacity: int) -> (pool: ^Pool, err: mem.Allocator_Error) {
+create_pool :: proc(item_size: int, capacity: int) -> (res: ^Pool, err: mem.Allocator_Error = .None) {
   assert(item_size > 0, "item size must be > 0")
 
   aligned_capacity := align_mask(capacity, 15)
   
-  pool = new(Pool)
-  pool.item_size = item_size
-  pool.capacity = aligned_capacity
-  pool.pages = new(Pool_Page)
+  res = new(Pool)
+  res.item_size = item_size
+  res.capacity = aligned_capacity
+  res.pages = new(Pool_Page)
 
-  page := pool.pages
+  page := res.pages
   page.iter = aligned_capacity
   page.ptrs = mem.make_aligned([]rawptr, aligned_capacity, 16) or_return
   page.buff = mem.make_aligned([]u8, item_size * aligned_capacity, 16) or_return
