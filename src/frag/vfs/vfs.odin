@@ -79,53 +79,73 @@ VFS_Context :: struct {
 
 ctx : VFS_Context
 
-load_text_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: bool = false) {
+load_text_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: linchpin.Error = nil) {
   handle, open_err := os.open(path)
   if open_err != os.ERROR_NONE {
-    return res, err
+    return res, .None
+  }
+
+  size, size_err := os.file_size(handle)
+  if size_err != os.ERROR_NONE && size > 0 {
+    res = linchpin.create_mem_block(size + 1, nil, 0) or_return
+    os.read_ptr(handle, res.data, int(size))
+    os.close(handle)
+    (cast([^]rune)res.data)[size] = rune(0)
+    return res, nil
+  }
+
+  os.close(handle)
+
+  return res, .None
+}
+
+load_binary_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: linchpin.Error = nil) {
+   handle, open_err := os.open(path)
+  if open_err != os.ERROR_NONE {
+    return res, .None
   }
   defer os.close(handle)
 
   size, size_err := os.file_size(handle)
   if size_err != os.ERROR_NONE {
-    return res, err
+    return res, .None
   }
 
   if size > 0 {
-    res, mem_err := linchpin.create_mem_block(size + 1, nil, 0)
+    res, mem_err := linchpin.create_mem_block(size, nil, 0)
     if mem_err != nil {
-      return res, err
+      return res, .None
     }
+    res = linchpin.create_mem_block(size, nil, 0) or_return
+    os.read_ptr(handle, res.data, int(size))
+    os.close(handle)
+    return res, nil
   }
 
-  return res, true
+  return res, .None
 }
 
-load_binary_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: bool = false) {
-  return nil, false
-}
-
-resolve_path :: proc(path: string, flags: VFS_Flags) -> (res: string, resolved: bool = false) {
+resolve_path :: proc(path: string, flags: VFS_Flags) -> (res: string, err: linchpin.Error = nil) {
   if .Absolute_Path in flags {
-    return filepath.clean(path), true
+    return filepath.clean(path), nil
   } else {
     for mp in &ctx.mounts {
       if path == mp.alias {
-        return filepath.join(mp.path, filepath.clean(path[len(mp.alias):])), true
+        return filepath.join(mp.path, filepath.clean(path[len(mp.alias):])), nil
       }
     }
     res = filepath.clean(path)
-    return res, os.exists(res)
+    return res, os.exists(res) ? nil : .Path_Not_Found
   }
-  return "", false
+  return "", .Path_Not_Found
 }
 
-read :: proc(path: string, flags: VFS_Flags) -> (res: ^linchpin.Mem_Block, read: bool = false) {
+read :: proc(path: string, flags: VFS_Flags) -> (res: ^linchpin.Mem_Block, err: linchpin.Error = nil) {
   resolved_path := resolve_path(path, flags) or_return
   if .Text_File in flags {
-    return load_text_file(resolved_path) or_return, true
+    return load_text_file(resolved_path) or_return, nil
    } else {
-     return load_binary_file(resolved_path) or_return, true
+     return load_binary_file(resolved_path) or_return, nil
    } 
 }
 
@@ -140,7 +160,7 @@ worker_thread_fn :: proc(_: ^thread.Thread) {
       switch req.command {
         case .Read:
           res.read_fn = req.read_fn
-          mem, read := read(req.path, req.flags); if read {
+          mem, err := read(req.path, req.flags); if err == .None {
             res.code = .Read_Ok
             res.read_mem = mem
           } else {
