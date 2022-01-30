@@ -1,9 +1,9 @@
-package linchpin
+package pool
+
+import "linchpin:alloc"
 
 import "core:fmt"
 import "core:mem"
-
-import "core:c"
 
 Pool_Page :: struct {
   ptrs: []rawptr,
@@ -41,7 +41,7 @@ delete_from_pool :: proc(pool: ^Pool, ptr: rawptr) {
 create_pool :: proc(item_size: int, capacity: int) -> (res: ^Pool, err: mem.Allocator_Error = nil) {
   assert(item_size > 0, "item size must be > 0")
 
-  aligned_capacity := align_mask(capacity, 15)
+  aligned_capacity := alloc.align_mask(capacity, 15)
   
   res = mem.new_aligned(Pool, 16) or_return
   res.item_size = item_size

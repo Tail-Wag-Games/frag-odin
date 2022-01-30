@@ -1,9 +1,12 @@
-package main
+package app
 
-import "../vendor/sokol"
+import "thirdparty:sokol"
 
-import "frag"
-import "frag/core"
+import "frag:api"
+import "frag:config"
+import "frag:core"
+import "frag:private"
+
 
 import "core:dynlib"
 import "core:fmt"
@@ -13,7 +16,7 @@ import "core:strings"
 import "core:sys/win32"
 
 App_Context :: struct {
-	conf: frag.Config,
+	conf: config.Config,
 }
 
 Command :: distinct string
@@ -36,6 +39,12 @@ init_callback :: proc "c" () {
 	context = runtime.default_context()
 
 	core.init(&ctx.conf)
+
+	for plugin in ctx.conf.plugins {
+		private.plugin_api.load(plugin)
+	}
+
+
 }
 
 frame_callback :: proc "c" () {
@@ -132,10 +141,12 @@ main :: proc() {
 		os.exit(1)
 	}
 
-	fn := cast(proc(conf: ^frag.Config)) ptr
+	fn := cast(proc(conf: ^config.Config)) ptr
 
-	conf := frag.Config{}
+	conf := config.Config{}
 	fn(&conf)
+
+	ctx.conf = conf
 	
 	err := sokol.run({
 		init_cb      = init_callback,

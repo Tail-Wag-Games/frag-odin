@@ -1,4 +1,7 @@
-package linchpin
+package memio
+
+import "linchpin:alloc"
+import "linchpin:error"
 
 import "core:mem"
 import "core:runtime"
@@ -11,11 +14,11 @@ Mem_Block :: struct {
   refcount: int,
 }
 
-create_mem_block :: proc(size: i64, data: rawptr, align: int) -> (res: ^Mem_Block, err: Error = nil) {
+create_mem_block :: proc(size: i64, data: rawptr, align: int) -> (res: ^Mem_Block, err: error.Error = nil) {
   desired_alignment := max(align, mem.DEFAULT_ALIGNMENT)
   res = mem.new_aligned(Mem_Block, desired_alignment) or_return
 
-  res.data = align_ptr(mem.ptr_offset(res, 1), 0, align)
+  res.data = alloc.align_ptr(mem.ptr_offset(res, 1), 0, align)
   res.size = size
   res.start_offset = 0
   res.align = align

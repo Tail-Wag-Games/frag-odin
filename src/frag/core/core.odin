@@ -1,27 +1,34 @@
 package core
 
-import "../../../vendor/sokol"
+import "thirdparty:sokol"
 
-import "../../linchpin"
+import "frag:asset"
+import "frag:config"
+import "frag:gfx"
+import "frag:plugin"
+import "frag:vfs"
 
-import ".."
-import "../asset"
-import "../gfx"
-import "../vfs"
+import "linchpin:error"
+import "linchpin:job"
+import "linchpin:platform"
 
 import "core:fmt"
 
 Core_Context :: struct {
-  job_ctx: ^linchpin.Job_Context,
+  job_ctx: ^job.Job_Context,
 }
+
 
 ctx : Core_Context
 
-init :: proc(conf: ^frag.Config) -> linchpin.Error {
+
+init :: proc(conf: ^config.Config) -> error.Error {
+  plugin.init("") or_return
+
   vfs.init() or_return
 
-  ctx.job_ctx = linchpin.create_job_context(&linchpin.Job_Context_Desc{
-    num_threads = linchpin.num_cores() - 1,
+  ctx.job_ctx = job.create_job_context(&job.Job_Context_Desc{
+    num_threads = platform.num_cores() - 1,
     max_fibers = 64,
     fiber_stack_size = 1024 * 1024,
   }) or_return
@@ -35,6 +42,7 @@ init :: proc(conf: ^frag.Config) -> linchpin.Error {
   return nil
 }
 
+
 shutdown :: proc() {
-  linchpin.destroy_job_context(ctx.job_ctx)
+  job.destroy_job_context(ctx.job_ctx)
 }

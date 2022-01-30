@@ -1,7 +1,7 @@
 package asset
 
-import ".."
-import "../internal"
+import "frag:api"
+import "frag:private"
 
 import "core:fmt"
 import "core:hash"
@@ -10,7 +10,7 @@ import "core:runtime"
 Asset_Manager :: struct {
   name: string,
   name_hash: u32,
-  callbacks: frag.Asset_Callbacks,
+  callbacks: api.Asset_Callbacks,
 }
 
 Asset_Context :: struct {
@@ -18,9 +18,11 @@ Asset_Context :: struct {
   asset_name_hashes: [dynamic]u32,
 }
 
+
 ctx := Asset_Context{}
 
-register_asset_type :: proc "c" (name: string, callbacks: frag.Asset_Callbacks) {
+
+register_asset_type :: proc "c" (name: string, callbacks: api.Asset_Callbacks) {
   context = runtime.default_context()
 
   name_hash := hash.fnv32a(transmute([]u8)name)
@@ -40,13 +42,14 @@ register_asset_type :: proc "c" (name: string, callbacks: frag.Asset_Callbacks) 
   append(&ctx.asset_name_hashes, name_hash)
 }
 
+
 init :: proc() {
 
 }
 
-@(init)
+@(init, private)
 init_asset_api :: proc() {
-  internal.asset_api = frag.Asset_API{
+  private.asset_api = api.Asset_API{
     register_asset_type = register_asset_type,
   }
 }

@@ -1,14 +1,16 @@
 package vfs
 
-import "../../linchpin"
+import "linchpin:error"
+import "linchpin:memio"
+import "linchpin:queue"
 
 import "core:os"
 import "core:path/filepath"
 import "core:sync"
 import "core:thread"
 
-VFS_Async_Read_Callback :: proc "c" (path: string, mem: ^linchpin.Mem_Block, user_data: rawptr)
-VFS_Async_Write_Callback :: proc "c" (path: string, bytes_written: int, mem: ^linchpin.Mem_Block, user_data: rawptr)
+VFS_Async_Read_Callback :: proc "c" (path: string, mem: ^memio.Mem_Block, user_data: rawptr)
+VFS_Async_Write_Callback :: proc "c" (path: string, bytes_written: int, mem: ^memio.Mem_Block, user_data: rawptr)
 
 VFS_Modify_Async_Callback :: proc "c" (path: string)
 
@@ -37,7 +39,7 @@ VFS_Async_Request :: struct {
   command: VFS_Async_Command,
   flags: VFS_Flags,
   path: string,
-  write_mem: ^linchpin.Mem_Block,
+  write_mem: ^memio.Mem_Block,
   using rw: struct #raw_union {
     read_fn: VFS_Async_Read_Callback,
     write_fn: VFS_Async_Write_Callback,
@@ -48,8 +50,8 @@ VFS_Async_Request :: struct {
 VFS_Async_Response :: struct {
   code: VFS_Response_Code,
   using rw_mem: struct #raw_union {
-    read_mem: ^linchpin.Mem_Block,
-    write_mem: ^linchpin.Mem_Block,
+    read_mem: ^memio.Mem_Block,
+    write_mem: ^memio.Mem_Block,
   },
   using rw_cb: struct #raw_union {
     read_fn: VFS_Async_Read_Callback,
@@ -70,16 +72,18 @@ VFS_Context :: struct {
   mounts: []VFS_Mount_Point,
   modify_cbs: []VFS_Modify_Async_Callback,
   worker_thread: ^thread.Thread,
-  req_queue: ^linchpin.SPSC_Queue,
-  res_queue: ^linchpin.SPSC_Queue,
+  req_queue: ^queue.SPSC_Queue,
+  res_queue: ^queue.SPSC_Queue,
   worker_sem: sync.Semaphore,
   quit: bool,
-  dmon_queue: ^linchpin.SPSC_Queue,
+  dmon_queue: ^queue.SPSC_Queue,
 }
+
 
 ctx : VFS_Context
 
-load_text_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: linchpin.Error = nil) {
+
+load_text_file :: proc(path: string) -> (res: ^memio.Mem_Block, err: error.Error = nil) {
   handle, open_err := os.open(path)
   if open_err != os.ERROR_NONE {
     return res, .None
@@ -87,7 +91,7 @@ load_text_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: linchpin
 
   size, size_err := os.file_size(handle)
   if size_err != os.ERROR_NONE && size > 0 {
-    res = linchpin.create_mem_block(size + 1, nil, 0) or_return
+    res = memio.create_mem_block(size + 1, nil, 0) or_return
     os.read_ptr(handle, res.data, int(size))
     os.close(handle)
     (cast([^]rune)res.data)[size] = rune(0)
@@ -99,7 +103,8 @@ load_text_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: linchpin
   return res, .None
 }
 
-load_binary_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: linchpin.Error = nil) {
+
+load_binary_file :: proc(path: string) -> (res: ^memio.Mem_Block, err: error.Error = nil) {
    handle, open_err := os.open(path)
   if open_err != os.ERROR_NONE {
     return res, .None
@@ -112,11 +117,11 @@ load_binary_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: linchp
   }
 
   if size > 0 {
-    res, mem_err := linchpin.create_mem_block(size, nil, 0)
+    res, mem_err := memio.create_mem_block(size, nil, 0)
     if mem_err != nil {
       return res, .None
     }
-    res = linchpin.create_mem_block(size, nil, 0) or_return
+    res = memio.create_mem_block(size, nil, 0) or_return
     os.read_ptr(handle, res.data, int(size))
     os.close(handle)
     return res, nil
@@ -125,7 +130,8 @@ load_binary_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: linchp
   return res, .None
 }
 
-resolve_path :: proc(path: string, flags: VFS_Flags) -> (res: string, err: linchpin.Error = nil) {
+
+resolve_path :: proc(path: string, flags: VFS_Flags) -> (res: string, err: error.Error = nil) {
   if .Absolute_Path in flags {
     return filepath.clean(path), nil
   } else {
@@ -140,7 +146,8 @@ resolve_path :: proc(path: string, flags: VFS_Flags) -> (res: string, err: linch
   return "", .Path_Not_Found
 }
 
-read :: proc(path: string, flags: VFS_Flags) -> (res: ^linchpin.Mem_Block, err: linchpin.Error = nil) {
+
+read :: proc(path: string, flags: VFS_Flags) -> (res: ^memio.Mem_Block, err: error.Error = nil) {
   resolved_path := resolve_path(path, flags) or_return
   if .Text_File in flags {
     return load_text_file(resolved_path) or_return, nil
@@ -149,10 +156,11 @@ read :: proc(path: string, flags: VFS_Flags) -> (res: ^linchpin.Mem_Block, err: 
    } 
 }
 
+
 worker_thread_fn :: proc(_: ^thread.Thread) {
   for !ctx.quit {
     req : VFS_Async_Request
-    if linchpin.consume_from_spsc_queue(ctx.res_queue, &req) {
+    if queue.consume_from_spsc_queue(ctx.res_queue, &req) {
       res := VFS_Async_Response{bytes_written = -1}
       res.path = req.path
       res.user_data = req.user_data
@@ -173,9 +181,9 @@ worker_thread_fn :: proc(_: ^thread.Thread) {
   }
 }
 
-init :: proc() -> (err: linchpin.Error = nil) {
-  ctx.req_queue = linchpin.create_spsc_queue(size_of(VFS_Async_Request), 128) or_return
-  ctx.res_queue = linchpin.create_spsc_queue(size_of(VFS_Async_Response), 128) or_return
+init :: proc() -> (err: error.Error = nil) {
+  ctx.req_queue = queue.create_spsc_queue(size_of(VFS_Async_Request), 128) or_return
+  ctx.res_queue = queue.create_spsc_queue(size_of(VFS_Async_Response), 128) or_return
 
   sync.semaphore_init(&ctx.worker_sem)
   ctx.worker_thread = thread.create_and_start(worker_thread_fn)

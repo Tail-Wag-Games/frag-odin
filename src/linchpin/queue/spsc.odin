@@ -1,6 +1,9 @@
-package linchpin
+package queue
 
-import lockless "../../vendor/c89atomic"
+import lockless "thirdparty:c89atomic"
+
+import "linchpin:alloc"
+import "linchpin:error"
 
 import "core:mem"
 import "core:runtime"
@@ -32,10 +35,10 @@ SPSC_Queue :: struct {
   grow_bins: ^SPSC_Queue_Bin,
 }
 
-create_spsc_queue :: proc(item_size: int, capacity: int) -> (res: ^SPSC_Queue, err: Error = nil) {
+create_spsc_queue :: proc(item_size: int, capacity: int) -> (res: ^SPSC_Queue, err: error.Error = nil) {
   assert(item_size > 0)
 
-  aligned_capacity := align_mask(capacity, 15)
+  aligned_capacity := alloc.align_mask(capacity, 15)
 
   res = new(SPSC_Queue)
   res.ptrs = make([]^SPSC_Queue_Node, aligned_capacity) or_return

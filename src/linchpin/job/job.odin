@@ -1,7 +1,11 @@
-package linchpin
+package job
 
-import fcontext "../../vendor/deboost.context"
-import lockless "../../vendor/c89atomic"
+import fcontext "thirdparty:deboost.context"
+import lockless "thirdparty:c89atomic"
+
+import "linchpin:error"
+import "linchpin:platform"
+import "linchpin:pool"
 
 import "core:fmt"
 import "core:sync"
@@ -67,8 +71,8 @@ Job_Context_Desc :: struct {
 Job_Context :: struct {
   threads: []^thread.Thread,
   stack_size: int,
-  job_pool: ^Pool,
-  counter_pool: ^Pool,
+  job_pool: ^pool.Pool,
+  counter_pool: ^pool.Pool,
   waiting_list: [Job_Priority.Count]^Job,
   waiting_list_last: [Job_Priority.Count]^Job,
   job_lock: lockless.Spinlock,
@@ -91,7 +95,7 @@ delete_job :: proc(ctx: ^Job_Context, job: ^Job) {
   lockless.lock_enter(&ctx.job_lock)
   defer lockless.lock_exit(&ctx.job_lock)
 
-  delete_from_pool(ctx.job_pool, job)
+  pool.delete_from_pool(ctx.job_pool, job)
 }
 
 remove_job_from_list :: proc(pfirst: ^^Job, plast: ^^Job, node: ^Job) {
@@ -205,14 +209,14 @@ destroy_job_tdata :: proc(tdata: ^Job_Thread_Data) {
   free(tdata)
 }
 
-create_job_tdata :: proc(tid: int, index: int, main_thread: bool) -> (res: ^Job_Thread_Data, err: Error) {
+create_job_tdata :: proc(tid: int, index: int, main_thread: bool) -> (res: ^Job_Thread_Data, err: error.Error) {
   res = new(Job_Thread_Data) or_return
 
   res.thread_index = index
   res.tid = tid
   res.main_thread = main_thread
 
-  res.selector_stack = fcontext.create_fcontext_stack(MIN_STACK_SIZE)
+  res.selector_stack = fcontext.create_fcontext_stack(platform.MIN_STACK_SIZE)
 
   return res, nil
 }
@@ -240,7 +244,7 @@ job_thread_fn :: proc(ctx: ^Job_Context, index: int) {
   }
 }
 
-create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: Error) {
+create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: error.Error) {
   res = new(Job_Context) or_return
 
   res.stack_size = desc.fiber_stack_size > 0 ? desc.fiber_stack_size : DEFAULT_FIBER_STACK_SIZE
@@ -257,10 +261,10 @@ create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: 
   }
   tl_thread_data.selector_fiber = fcontext.make_fcontext(tl_thread_data.selector_stack.sptr, tl_thread_data.selector_stack.ssize, main_thread_job_selector)
 
-  res.job_pool = create_pool(size_of(Job), max_fibers) or_return
-  res.counter_pool = create_pool(size_of(int), COUNTER_POOL_SIZE) or_return
+  res.job_pool = pool.create_pool(size_of(Job), max_fibers) or_return
+  res.counter_pool = pool.create_pool(size_of(int), COUNTER_POOL_SIZE) or_return
 
-  num_threads := desc.num_threads > 0 ? desc.num_threads : (num_cores() - 1)
+  num_threads := desc.num_threads > 0 ? desc.num_threads : (platform.num_cores() - 1)
   if num_threads > 0 {
     res.threads = make([]^thread.Thread, num_threads)
 
@@ -285,8 +289,8 @@ destroy_job_context :: proc(ctx: ^Job_Context) {
 
   destroy_job_tdata(tl_thread_data)
 
-  destroy_pool(ctx.job_pool)
-  destroy_pool(ctx.counter_pool)
+  pool.destroy_pool(ctx.job_pool)
+  pool.destroy_pool(ctx.counter_pool)
   sync.semaphore_destroy(&ctx.sem)
 
   free(ctx)

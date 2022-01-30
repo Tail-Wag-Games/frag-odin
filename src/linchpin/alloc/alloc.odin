@@ -1,4 +1,4 @@
-package linchpin
+package alloc
 
 align_mask :: proc(value: $T, mask: T) -> T {
   return ((value + mask) & (~T(0) & ~mask))

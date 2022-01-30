@@ -7,3 +7,6 @@
 [submodule "vendor/c89atomic"]
 	path = vendor/c89atomic
 	url = git@github.com:Tail-Wag-Games/c89atomic.git
+[submodule "vendor/cr"]
+	path = vendor/cr
+	url = git@github.com:Tail-Wag-Games/cr.git

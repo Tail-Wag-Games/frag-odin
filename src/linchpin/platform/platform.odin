@@ -1,4 +1,4 @@
-package linchpin
+package platform
 
 import win32 "core:sys/windows"
 
