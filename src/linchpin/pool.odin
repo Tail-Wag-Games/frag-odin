@@ -18,10 +18,6 @@ Pool :: struct {
   pages: ^Pool_Page,
 }
 
-align_mask :: proc(value: int, mask: int) -> int {
-  return ((value + mask) & (~int(0) & ~mask))
-}
-
 delete_from_pool :: proc(pool: ^Pool, ptr: rawptr) {
   uptr := uintptr(ptr)
   page := pool.pages

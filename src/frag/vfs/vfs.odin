@@ -79,11 +79,29 @@ VFS_Context :: struct {
 
 ctx : VFS_Context
 
-load_text_file :: proc(path: string) -> (^linchpin.Mem_Block, bool) {  
-  return nil, false
+load_text_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: bool = false) {
+  handle, open_err := os.open(path)
+  if open_err != os.ERROR_NONE {
+    return res, err
+  }
+  defer os.close(handle)
+
+  size, size_err := os.file_size(handle)
+  if size_err != os.ERROR_NONE {
+    return res, err
+  }
+
+  if size > 0 {
+    res, mem_err := linchpin.create_mem_block(size + 1, nil, 0)
+    if mem_err != nil {
+      return res, err
+    }
+  }
+
+  return res, true
 }
 
-load_binary_file :: proc(path: string) -> (^linchpin.Mem_Block, bool) {
+load_binary_file :: proc(path: string) -> (res: ^linchpin.Mem_Block, err: bool = false) {
   return nil, false
 }
 
