@@ -23,7 +23,7 @@ ctx : Core_Context
 
 
 init :: proc(conf: ^config.Config) -> error.Error {
-  plugin.init("") or_return
+  plugin.init(conf.plugin_path) or_return
 
   vfs.init() or_return
 

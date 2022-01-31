@@ -39,6 +39,14 @@ Plugin_Context :: struct {
 
 ctx : Plugin_Context
 
+load_abs :: proc(name: string, entry: bool) -> (err: error.Error = nil) {
+}
+
+load :: proc(name: string) -> (err: error.Error = nil) {
+  assert(!ctx.loaded, "additional plugins cannot be loaded after `init_plugins` has been invoked")
+  load_abs(name, false)
+}
+
 
 init :: proc(plugin_path: string) -> (err: error.Error = nil) {
   ctx.plugin_path = filepath.clean(plugin_path)
@@ -53,6 +61,6 @@ init :: proc(plugin_path: string) -> (err: error.Error = nil) {
 @(init, private)
 init_plugin_api :: proc() {
   private.plugin_api = api.Plugin_API{
-    
+    load = load,
   }
 }

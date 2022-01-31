@@ -23,7 +23,9 @@ Asset_Obj :: struct #raw_union {
 	ptr: rawptr,
 }
 
-Asset_Handle :: distinct u32
+Asset_Handle :: struct {
+	id: u32,
+}
 
 Asset_Load_Params :: struct {
 	path: string,
@@ -44,6 +46,10 @@ Asset_Callbacks :: struct {
 
 Asset_API :: struct {
 	register_asset_type: proc "c" (name: string, callbacks: Asset_Callbacks),
+}
+
+Gfx_Stage :: struct {
+	id: u32,
 }
 
 Plugin_Event :: enum i32 {
