@@ -2,6 +2,8 @@ package app
 
 import "thirdparty:sokol"
 
+import "linchpin:platform"
+
 import "frag:api"
 import "frag:config"
 import "frag:core"
@@ -10,13 +12,16 @@ import "frag:private"
 
 import "core:dynlib"
 import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:runtime"
+import "core:slice"
 import "core:strings"
 import "core:sys/win32"
 
 App_Context :: struct {
 	conf: config.Config,
+	app_module: dynlib.Library,
 }
 
 Command :: distinct string
@@ -25,11 +30,14 @@ run : Command : "run"
 
 ctx := App_Context{}
 
-dlerr :: proc() -> string {
-  when ODIN_OS == "windows" {
-    return fmt.tprintf("%d", win32.get_last_error())
-  }
-}
+default_name : string
+default_title : string
+default_plugin_path : string
+default_plugins : [dynamic]string
+
+lit :: proc(str: string) -> (int, string) {
+	return len(str), str
+} 
 
 message_box :: proc(msg: string) {
   win32.message_box_a(nil, strings.clone_to_cstring(msg, context.temp_allocator), "frag", win32.MB_OK|win32.MB_ICONERROR)
@@ -37,14 +45,22 @@ message_box :: proc(msg: string) {
 
 init_callback :: proc "c" () {
 	context = runtime.default_context()
+	context.logger = log.create_console_logger()
 
-	core.init(&ctx.conf)
+	log.info("initializing core!")
 
-	for plugin in ctx.conf.plugins {
-		private.plugin_api.load(plugin)
+	if err := core.init(&ctx.conf, ctx.app_module); err != nil {
+		log.errorf("failed initializing core subsystem: %v", err)
+		message_box("failed initializing core subsystem, see log for details")
+		os.exit(1)
 	}
 
-
+	for plugin in ctx.conf.plugins {
+		if err := private.plugin_api.load(plugin); err != nil {
+			log.errorf("failed initializing plugin: %v", err)
+			os.exit(1)
+		}
+	}
 }
 
 frame_callback :: proc "c" () {
@@ -70,9 +86,10 @@ event_callback :: proc "c" (event: ^sokol.Event) {
 	}
 }
 
-lit :: proc(str: string) -> (int, string) {
-	return len(str), str
-} 
+@(private)
+name :: proc() -> string {
+	return ctx.conf.app_name
+}
 
 print_usage_line :: proc(indent: int, fmt_string: string, args: ..any) {
 	i := indent
@@ -131,13 +148,13 @@ main :: proc() {
 
 	lib, lib_ok := dynlib.load_library(game_filepath)
 	if !lib_ok {
-		message_box(fmt.tprintf("Plugin at path: %s - is not a valid shared library! Error: %s", game_filepath, dlerr()))
+		message_box(fmt.tprintf("Plugin at path: %s - is not a valid shared library! Error: %s", game_filepath, platform.dlerr()))
 		os.exit(1)
 	}
 
 	ptr, sym_ok := dynlib.symbol_address(lib, "frag_app")
 	if !sym_ok {
-		message_box(fmt.tprintf("Plugin at path: %s - does not export a symbol named 'frag_app'!", game_filepath, dlerr()))
+		message_box(fmt.tprintf("Plugin at path: %s - does not export a symbol named 'frag_app'!", game_filepath, platform.dlerr()))
 		os.exit(1)
 	}
 
@@ -146,9 +163,21 @@ main :: proc() {
 	conf := config.Config{}
 	fn(&conf)
 
-	ctx.conf = conf
+	default_name = strings.clone(conf.app_name)
+	conf.app_name = default_name
+	default_title = strings.clone(conf.app_title)
+	conf.app_title = default_title
+	default_plugin_path = strings.clone(conf.plugin_path)
+	conf.plugin_path = default_plugin_path
 	
-	err := sokol.run({
+	for i := 0; i < len(conf.plugins); i += 1 {
+		append(&default_plugins, strings.clone(conf.plugins[i]))
+		conf.plugins[i] = default_plugins[i]
+	}
+
+	dynlib.unload_library(lib)
+
+	sokol.run({
 		init_cb      = init_callback,
 		frame_cb     = frame_callback,
 		cleanup_cb   = cleanup_callback,
@@ -157,5 +186,11 @@ main :: proc() {
 		height       = auto_cast conf.window_height,
 		window_title = strings.clone_to_cstring(conf.app_title, context.temp_allocator),
 	})
-	os.exit(int(err))
+}
+
+@(init, private)
+init_app_api :: proc() {
+  private.app_api = api.App_API {
+    name = name,
+  }
 }

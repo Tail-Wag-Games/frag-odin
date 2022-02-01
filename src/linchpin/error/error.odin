@@ -2,14 +2,19 @@ package error
 
 import "core:runtime"
 
-OS_Error :: enum {
+Plugin_Error :: struct {
+  msg: string,
+}
+
+IO_Error :: enum {
   Path_Not_Found,
   Directory,
 }
 
 Error :: union {
 	runtime.Allocator_Error,
-  OS_Error,
+  IO_Error,
+  Plugin_Error,
 };
 
 error_descriptions := map[Error]string{

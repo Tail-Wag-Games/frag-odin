@@ -9,10 +9,10 @@ import "core:path/filepath"
 import "core:sync"
 import "core:thread"
 
-VFS_Async_Read_Callback :: proc "c" (path: string, mem: ^memio.Mem_Block, user_data: rawptr)
-VFS_Async_Write_Callback :: proc "c" (path: string, bytes_written: int, mem: ^memio.Mem_Block, user_data: rawptr)
+VFS_Async_Read_Callback :: proc (path: string, mem: ^memio.Mem_Block, user_data: rawptr)
+VFS_Async_Write_Callback :: proc (path: string, bytes_written: int, mem: ^memio.Mem_Block, user_data: rawptr)
 
-VFS_Modify_Async_Callback :: proc "c" (path: string)
+VFS_Modify_Async_Callback :: proc (path: string)
 
 VFS_Async_Command :: enum {
   Read,

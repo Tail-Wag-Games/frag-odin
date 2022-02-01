@@ -22,7 +22,7 @@ Asset_Context :: struct {
 ctx := Asset_Context{}
 
 
-register_asset_type :: proc "c" (name: string, callbacks: api.Asset_Callbacks) {
+register_asset_type :: proc (name: string, callbacks: api.Asset_Callbacks) {
   context = runtime.default_context()
 
   name_hash := hash.fnv32a(transmute([]u8)name)
@@ -49,7 +49,7 @@ init :: proc() {
 
 @(init, private)
 init_asset_api :: proc() {
-  private.asset_api = api.Asset_API{
+  private.asset_api = api.Asset_API {
     register_asset_type = register_asset_type,
   }
 }

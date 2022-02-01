@@ -12,9 +12,9 @@ import "core:sync"
 import "core:thread"
 import "core:runtime"
 
-Job_Callback :: proc "c" (range_start: int, range_end: int, thread_index: int, user_data: rawptr)
-Job_Thread_Init_Callback :: proc "c" (ctx: ^Job_Context, thread_index: int, thread_id: int, user_data: rawptr)
-Job_Thread_Shutdown_Callback :: proc "c" (ctx: ^Job_Context, thread_index: int, thread_id: int, user_data: rawptr)
+Job_Callback :: proc (range_start: int, range_end: int, thread_index: int, user_data: rawptr)
+Job_Thread_Init_Callback :: proc (ctx: ^Job_Context, thread_index: int, thread_id: int, user_data: rawptr)
+Job_Thread_Shutdown_Callback :: proc (ctx: ^Job_Context, thread_index: int, thread_id: int, user_data: rawptr)
 
 Job_Handle :: ^u32
 

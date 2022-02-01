@@ -12,7 +12,9 @@ import "linchpin:error"
 import "linchpin:job"
 import "linchpin:platform"
 
+import "core:dynlib"
 import "core:fmt"
+import "core:log"
 
 Core_Context :: struct {
   job_ctx: ^job.Job_Context,
@@ -22,8 +24,9 @@ Core_Context :: struct {
 ctx : Core_Context
 
 
-init :: proc(conf: ^config.Config) -> error.Error {
-  plugin.init(conf.plugin_path) or_return
+init :: proc(conf: ^config.Config, app_module: dynlib.Library) -> error.Error {
+  log.info("initializing plugin subsystem!")
+  plugin.init(conf.plugin_path, app_module) or_return
 
   vfs.init() or_return
 
@@ -41,7 +44,6 @@ init :: proc(conf: ^config.Config) -> error.Error {
   
   return nil
 }
-
 
 shutdown :: proc() {
   job.destroy_job_context(ctx.job_ctx)

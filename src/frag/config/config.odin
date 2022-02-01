@@ -7,7 +7,7 @@ Config :: struct {
   cache_path: string,
   cwd: string,
   app_version: u32,
-  plugins: []string,
+  plugins: [dynamic]string,
   window_width: int,
   window_height: int,
 }

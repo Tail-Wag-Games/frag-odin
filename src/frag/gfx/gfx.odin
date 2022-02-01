@@ -10,27 +10,27 @@ import "frag:private"
 import "core:fmt"
 
 
-on_prepare_shader :: proc "c" (params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
+on_prepare_shader :: proc (params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
 
 }
 
 
-on_load_shader :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
+on_load_shader :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
 
 }
 
 
-on_finalize_shader :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
+on_finalize_shader :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
 
 }
 
 
-on_reload_shader :: proc "c" (handle: api.Asset_Handle, prev_obj: api.Asset_Obj) {
+on_reload_shader :: proc (handle: api.Asset_Handle, prev_obj: api.Asset_Obj) {
 
 }
 
 
-on_release_shader :: proc "c" (obj: api.Asset_Obj) {
+on_release_shader :: proc (obj: api.Asset_Obj) {
 
 }
 
