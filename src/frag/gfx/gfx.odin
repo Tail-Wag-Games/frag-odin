@@ -13,6 +13,7 @@ import "core:fmt"
 import "core:hash"
 import "core:mem"
 import "core:runtime"
+import "core:slice"
 
 Gfx_Command :: enum {
   Begin_Default_Pass,
@@ -57,7 +58,7 @@ Gfx_Stage_State :: enum {
 }
 
 Gfx_Stage :: struct {
-  name: string,
+  name: [32]u8,
   name_hash: u32,
   state: Gfx_Stage_State,
   parent: api.Gfx_Stage_Handle,
@@ -74,7 +75,11 @@ Gfx_Context :: struct {
   cmd_buffers_feed: []Gfx_Command_Buffer,
   cmd_buffers_render: []Gfx_Command_Buffer,
   stage_lock: lockless.Spinlock,
+
+  cur_stage_name: [32]u8,
 }
+
+Run_Command_Callback :: proc(buff: []u8, offset: int) -> ([]u8, int)
 
 STAGE_ORDER_DEPTH_BITS :: 6
 STAGE_ORDER_DEPTH_MASK :: 0xfc00
@@ -83,8 +88,103 @@ STAGE_ORDER_ID_MASK :: 0x03ff
 
 ctx : Gfx_Context
 
+run_command_cbs := [17]Run_Command_Callback {
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_end_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_default_pass,
+  run_cb_begin_stage,
+  run_cb_end_stage,
+}
+
+run_cb_end_pass :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  sokol.sg_end_pass()
+  return buff, offset
+}
+
+run_cb_begin_default_pass :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  cur_offset := offset
+
+  pass_action := cast(^sokol.sg_pass_action)&buff[cur_offset]
+  cur_offset += size_of(sokol.sg_pass_action)
+  width := cast(^i32)&buff[cur_offset]
+  cur_offset += size_of(i32)
+  height := cast(^i32)&buff[cur_offset]
+  cur_offset += size_of(i32)
+
+  sokol.sg_begin_default_pass(pass_action, width^, height^)
+
+  return buff, cur_offset
+}
+
+run_cb_begin_stage :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  cur_offset := offset
+
+  name := cast(cstring)&buff[cur_offset]
+  cur_offset += 32
+
+  mem.copy(&ctx.cur_stage_name[0], transmute(rawptr)name, size_of(ctx.cur_stage_name))
+  
+  return buff, cur_offset
+}
+
+run_cb_end_stage :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  ctx.cur_stage_name[0] = u8(0)
+
+  return buff, offset
+}
+
 execute_command_buffer :: proc(cmds: []Gfx_Command_Buffer) -> int {
-  return 0
+  assert(private.core_api.job_thread_index() == 0, "`execute_command_buffer` should only be invoked from main thread")
+
+  cmd_count := 0
+  cmd_buffer_count := private.core_api.num_job_threads()
+
+  for i in 0 ..< cmd_buffer_count {
+    cb := &cmds[i]
+    assert(cb.running_stage.id == 0, "`end_stage` must be called for all command buffers which draw calls have been submitted for")
+    cmd_count += len(cb.refs)
+  }
+
+  if cmd_count > 0 {
+    refs := make([]Gfx_Command_Buffer_Ref, cmd_count, context.temp_allocator)
+
+    cur_ref_count := 0
+    init_refs := refs
+    for i in 0 ..< cmd_buffer_count {
+      cb := &cmds[i]
+      ref_count := len(cb.refs)
+      if ref_count > 0 {
+        mem.copy(&refs[cur_ref_count], mem.raw_dynamic_array_data(cb.refs), size_of(Gfx_Command_Buffer_Ref) * ref_count)
+        cur_ref_count += ref_count
+        runtime.clear_dynamic_array(&cb.refs)
+      }
+    }
+    refs = init_refs
+
+    slice.sort_by(refs, proc(x, y: Gfx_Command_Buffer_Ref) -> bool {
+      return x.key < y.key
+    })
+
+    for i in 0 ..< cmd_count {
+      ref := &refs[i]
+      cb := &cmds[ref.cmd_buffer_idx]
+      run_command_cbs[ref.cmd](cb.params_buff[:], ref.params_offset)
+    }
+  }
+
+  return cmd_count
 }
 
 execute_command_buffers :: proc () {
@@ -109,6 +209,7 @@ end_cb_stage :: proc "c" () {
   stage.state = .Done
   lockless.lock_exit(&ctx.stage_lock)
 
+  record_cb_end_stage()
   cb.running_stage = { id = 0 }
 }
 
@@ -167,8 +268,49 @@ begin_cb_default_pass :: proc "c" (pass_action: ^sokol.sg_pass_action, width: i3
   mem.copy(buff, pass_action, size_of(pass_action^))
   buff = mem.ptr_offset(buff, size_of(pass_action^))
   (cast(^i32)buff)^ = width
-  buff = mem.ptr_offset(buff, size_of(int))
+  buff = mem.ptr_offset(buff, size_of(i32))
   (cast(^i32)buff)^ = height
+}
+
+record_cb_begin_stage :: proc(name: cstring, name_size: int) {
+  assert(name_size == 32)
+
+  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
+
+  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
+  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
+
+  offset := 0
+  buff := make_cb_params_buff(cb, name_size, &offset)
+
+  ref := Gfx_Command_Buffer_Ref {
+    key = ((u32(cb.stage_order) << 16) | u32(cb.cmd_idx)),
+    cmd_buffer_idx = cb.index,
+    cmd = .Stage_Push,
+    params_offset = offset,
+  }
+  append(&cb.refs, ref)
+
+  cb.cmd_idx += 1
+
+  mem.copy(buff, transmute(rawptr)name, name_size)
+}
+
+record_cb_end_stage :: proc() {
+  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
+
+  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
+  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
+
+  ref := Gfx_Command_Buffer_Ref {
+    key = ((u32(cb.stage_order) << 16) | u32(cb.cmd_idx)),
+    cmd_buffer_idx = cb.index,
+    cmd = .Stage_Pop,
+    params_offset = len(cb.params_buff),
+  }
+  append(&cb.refs, ref)
+
+  cb.cmd_idx += 1
 }
 
 begin_cb_stage :: proc "c" (stage_handle: api.Gfx_Stage_Handle) -> bool {
@@ -190,6 +332,8 @@ begin_cb_stage :: proc "c" (stage_handle: api.Gfx_Stage_Handle) -> bool {
   cb.stage_order = stage.order
   lockless.lock_exit(&ctx.stage_lock)
 
+  record_cb_begin_stage(transmute(cstring)&stage.name[0], size_of(stage.name))
+
   return true
 }
 
@@ -209,12 +353,12 @@ register_stage :: proc "c" (name: string, parent_stage: api.Gfx_Stage_Handle) ->
   context = runtime.default_context()
 
   stage := Gfx_Stage {
-    name = name,
     name_hash = hash.fnv32a(transmute([]u8)name),
     parent = parent_stage,
     enabled = true,
     single_enabled = true,
   }
+  mem.copy(&stage.name[0], mem.raw_string_data(name), size_of(stage.name))
 
   handle := api.Gfx_Stage_Handle {
     id = api.to_id(len(ctx.stages)),

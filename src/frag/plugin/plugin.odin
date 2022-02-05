@@ -15,7 +15,7 @@ import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:runtime"
-import "core:sort"
+import "core:slice"
 import "core:strings"
 
 Injected_Plugin_Api :: struct {
@@ -197,7 +197,9 @@ sort_dependencies :: proc() -> error.Error {
     }
   }
 
-  sort.quick_sort(ctx.plugin_update_order[:])
+  slice.sort_by(ctx.plugin_update_order[:], proc(x, y: int) -> bool {
+    return ctx.plugins[x].order < ctx.plugins[y].order
+  })
 
   return nil
 }
