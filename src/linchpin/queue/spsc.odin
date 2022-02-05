@@ -1,6 +1,6 @@
 package queue
 
-import lockless "thirdparty:c89atomic"
+import "thirdparty:lockless"
 
 import "linchpin:alloc"
 import "linchpin:error"

@@ -1,12 +1,15 @@
-[submodule "vendor/sokol"]
-	path = vendor/sokol
+[submodule "thirdparty/sokol"]
+	path = thirdparty/sokol
 	url = git@github.com:Tail-Wag-Games/sokol.git
-[submodule "vendor/deboost.context"]
-	path = vendor/deboost.context
-	url = git@github.com:Tail-Wag-Games/deboost.context.git
-[submodule "vendor/c89atomic"]
-	path = vendor/c89atomic
-	url = git@github.com:Tail-Wag-Games/c89atomic.git
-[submodule "vendor/cr"]
-	path = vendor/cr
+[submodule "thirdparty/cr"]
+	path = thirdparty/cr
 	url = git@github.com:Tail-Wag-Games/cr.git
+[submodule "thirdparty/cimgui"]
+	path = thirdparty/cimgui
+	url = git@github.com:Tail-Wag-Games/odin-imgui.git
+[submodule "thirdparty/lockless"]
+	path = thirdparty/lockless
+	url = git@github.com:Tail-Wag-Games/c89atomic.git
+[submodule "thirdparty/fcontext"]
+	path = thirdparty/fcontext
+	url = git@github.com:Tail-Wag-Games/deboost.context.git

@@ -2,8 +2,11 @@ package error
 
 import "core:runtime"
 
-Plugin_Error :: struct {
-  msg: string,
+Plugin_Error :: enum {
+  Load,
+  Init,
+  Inital_Update,
+  Symbol_Not_Found,
 }
 
 IO_Error :: enum {

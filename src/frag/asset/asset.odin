@@ -49,7 +49,7 @@ init :: proc() {
 
 @(init, private)
 init_asset_api :: proc() {
-  private.asset_api = api.Asset_API {
+  private.asset_api = api.Asset_Api {
     register_asset_type = register_asset_type,
   }
 }

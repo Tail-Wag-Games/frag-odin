@@ -7,12 +7,15 @@ import "linchpin:platform"
 import "frag:api"
 import "frag:config"
 import "frag:core"
+import "frag:plugin"
 import "frag:private"
 
 
 import "core:dynlib"
 import "core:fmt"
 import "core:log"
+import "core:math/linalg"
+import "core:mem"
 import "core:os"
 import "core:runtime"
 import "core:slice"
@@ -21,6 +24,8 @@ import "core:sys/win32"
 
 App_Context :: struct {
 	conf: config.Config,
+	app_filepath: string,
+	window_size: linalg.Vector2f32,
 	app_module: dynlib.Library,
 }
 
@@ -28,12 +33,12 @@ Command :: distinct string
 
 run : Command : "run"
 
-ctx := App_Context{}
+ctx : App_Context
 
 default_name : string
 default_title : string
 default_plugin_path : string
-default_plugins : [dynamic]string
+default_plugins : [config.MAX_PLUGINS]string
 
 lit :: proc(str: string) -> (int, string) {
 	return len(str), str
@@ -47,24 +52,39 @@ init_callback :: proc "c" () {
 	context = runtime.default_context()
 	context.logger = log.create_console_logger()
 
-	log.info("initializing core!")
-
 	if err := core.init(&ctx.conf, ctx.app_module); err != nil {
 		log.errorf("failed initializing core subsystem: %v", err)
 		message_box("failed initializing core subsystem, see log for details")
 		os.exit(1)
 	}
 
-	for plugin in ctx.conf.plugins {
-		if err := private.plugin_api.load(plugin); err != nil {
-			log.errorf("failed initializing plugin: %v", err)
+	for p in ctx.conf.plugins {
+		if len(p) == 0 {
+			break
+		}
+
+		if plugin.load(p) != nil {
 			os.exit(1)
 		}
+	}
+
+	if plugin.load_abs(ctx.app_filepath, true, ctx.conf.plugins[:]) != nil {
+		log.errorf("failed loading application's shared library at: %s", ctx.app_filepath)
+		message_box("failed loading application's shared library, see log for details")
+		os.exit(1)
+	}
+
+	if plugin.init_plugins() != nil {
+		log.error("failed initializing plugins")
+		message_box("failed initializing plugins, see log for details")
+		os.exit(1)
 	}
 }
 
 frame_callback :: proc "c" () {
 	context = runtime.default_context()
+
+	core.frame()
 }
 
 cleanup_callback :: proc "c" () {
@@ -73,21 +93,21 @@ cleanup_callback :: proc "c" () {
 	core.shutdown()
 }
 
-event_callback :: proc "c" (event: ^sokol.Event) {
-	if event.type == .KEY_DOWN && !event.key_repeat {
+event_callback :: proc "c" (event: ^sokol.sapp_event) {
+	if event.type == .SAPP_EVENTTYPE_KEY_DOWN && !event.key_repeat {
 		#partial switch event.key_code {
-		case .ESCAPE:
-			sokol.request_quit()
-		case .Q:
-			if .CTRL in event.modifiers {
-				sokol.request_quit()
+		case .SAPP_KEYCODE_ESCAPE:
+			sokol.sapp_request_quit()
+		case .SAPP_KEYCODE_Q:
+			if u32(sokol.sapp_modifier.SAPP_MODIFIER_CTRL) == event.modifiers {
+				sokol.sapp_request_quit()
 			}
 		}
 	}
 }
 
 @(private)
-name :: proc() -> string {
+name :: proc "c" () -> string {
 	return ctx.conf.app_name
 }
 
@@ -107,7 +127,7 @@ usage :: proc(program_name: string) {
 	print_usage_line(0, "Usage:")
 	print_usage_line(1, "%*s command [arguments]", lit(program_name))
 	print_usage_line(0, "Commands:")
-	print_usage_line(1, "run       run a frag plugin that defines an application entry point.")
+	print_usage_line(1, "run       load an application entry point from a shared library and run it.")
 	print_usage_line(0, "")
 	print_usage_line(0, "For further details on a command, use -help after the command name")
 	print_usage_line(1, "e.g. frag run -help")
@@ -121,7 +141,9 @@ main :: proc() {
 		os.exit(1)
 	}
 
-	game_filepath : string
+	sokol.stm_setup()
+
+	app_filepath : string
 	switch command := Command(args[1]); command {
 		case run:
 			if len(args) < 3 {
@@ -129,38 +151,39 @@ main :: proc() {
 				os.exit(1)
 			}
 
-			game_filepath = args[2]
+			app_filepath = args[2]
 		case:
 			usage(args[0])
 			os.exit(1)
 	}
 
-	if len(game_filepath) == 0 {
+	if len(app_filepath) == 0 {
 		message_box("Must provide path to frag plugin defining application entry point, as argument to 'run' command!")
 		usage(args[0])
 		os.exit(1)
 	}
 
-	if !os.is_file(game_filepath) {
-		message_box(fmt.tprintf("Plugin at path: %s - does not exist!", game_filepath))
+	if !os.is_file(app_filepath) {
+		message_box(fmt.tprintf("Plugin at path: %s - does not exist!", app_filepath))
 		os.exit(1)
 	}
 
-	lib, lib_ok := dynlib.load_library(game_filepath)
+	lib, lib_ok := dynlib.load_library(app_filepath)
 	if !lib_ok {
-		message_box(fmt.tprintf("Plugin at path: %s - is not a valid shared library! Error: %s", game_filepath, platform.dlerr()))
+		message_box(fmt.tprintf("Plugin at path: %s - is not a valid shared library! Error: %s", app_filepath, platform.dlerr()))
 		os.exit(1)
 	}
 
 	ptr, sym_ok := dynlib.symbol_address(lib, "frag_app")
 	if !sym_ok {
-		message_box(fmt.tprintf("Plugin at path: %s - does not export a symbol named 'frag_app'!", game_filepath, platform.dlerr()))
+		message_box(fmt.tprintf("Plugin at path: %s - does not export a symbol named 'frag_app'!", app_filepath, platform.dlerr()))
 		os.exit(1)
 	}
 
 	fn := cast(proc(conf: ^config.Config)) ptr
 
 	conf := config.Config{}
+	
 	fn(&conf)
 
 	default_name = strings.clone(conf.app_name)
@@ -170,14 +193,22 @@ main :: proc() {
 	default_plugin_path = strings.clone(conf.plugin_path)
 	conf.plugin_path = default_plugin_path
 	
-	for i := 0; i < len(conf.plugins); i += 1 {
-		append(&default_plugins, strings.clone(conf.plugins[i]))
+	for i := 0; i < config.MAX_PLUGINS; i += 1 {
+		if len(conf.plugins[i]) == 0 {
+			break
+		}
+
+		default_plugins[i] = strings.clone(conf.plugins[i])
 		conf.plugins[i] = default_plugins[i]
 	}
 
 	dynlib.unload_library(lib)
 
-	sokol.run({
+	ctx.conf = conf
+	ctx.app_filepath = app_filepath
+	ctx.window_size = {f32(conf.window_width), f32(conf.window_height)}
+
+	sokol.sapp_run(&sokol.sapp_desc{
 		init_cb      = init_callback,
 		frame_cb     = frame_callback,
 		cleanup_cb   = cleanup_callback,
@@ -190,7 +221,9 @@ main :: proc() {
 
 @(init, private)
 init_app_api :: proc() {
-  private.app_api = api.App_API {
+  private.app_api = {
+		width = sokol.sapp_width,
+		height = sokol.sapp_height,
     name = name,
   }
 }

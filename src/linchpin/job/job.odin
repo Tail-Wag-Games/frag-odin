@@ -1,7 +1,7 @@
 package job
 
-import fcontext "thirdparty:deboost.context"
-import lockless "thirdparty:c89atomic"
+import "thirdparty:fcontext"
+import "thirdparty:lockless"
 
 import "linchpin:error"
 import "linchpin:platform"
@@ -294,4 +294,8 @@ destroy_job_context :: proc(ctx: ^Job_Context) {
   sync.semaphore_destroy(&ctx.sem)
 
   free(ctx)
+}
+
+thread_index :: proc(ctx: ^Job_Context) -> int {
+  return tl_thread_data.thread_index
 }
