@@ -433,24 +433,6 @@ MAX_APP_TOUCHPOINTS :: 8
 MAX_APP_MOUSE_BUTTONS :: 3
 MAX_APP_KEY_CODES :: 512
 
-@(private)
-core_api : Core_Api
-
-@(private)
-plugin_api: Plugin_Api
-
-@(private)
-app_api : App_Api
-
-@(private)
-gfx_api: Gfx_Api
-
-@(private)
-vfs_api: Gfx_Api
-
-@(private)
-asset_api : Asset_Api
-
 to_id :: proc(idx: int) -> u32 {
 	return u32(idx) + 1
 }
