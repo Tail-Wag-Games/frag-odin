@@ -6,6 +6,7 @@ import "linchpin:error"
 import "linchpin:memio"
 
 import "core:log"
+import "core:math/linalg"
 import "core:mem"
 import "core:runtime"
 
@@ -202,6 +203,7 @@ App_Event_Callback :: proc "c" (e: ^App_Event)
 App_Api :: struct {
 	width: proc "c" () -> i32,
 	height: proc "c" () -> i32,
+	window_size: proc "c" (size: ^linalg.Vector2f32),
 	dpi_scale: proc "c" () -> f32,
 	config: proc "c" () -> ^Config,
 	name: proc "c" () -> string,
@@ -251,7 +253,10 @@ Core_Flags :: bit_set[Core_Flag]
 
 Core_Api :: struct {
 	alloc: proc "c" () -> mem.Allocator,
+
+	delta_tick: proc "c" () -> u64,
 	fps: proc "c" () -> f32,
+
 	job_thread_index: proc "c" () -> int,
 	num_job_threads: proc "c" () -> int,
 }

@@ -2,13 +2,14 @@ package core
 
 import "thirdparty:sokol"
 
-import "frag:asset"
-
 import "frag:api"
+import "frag:asset"
 import "frag:gfx"
 import "frag:plugin"
 import "frag:private"
 import "frag:vfs"
+
+import imgui "imgui:types"
 
 import "linchpin:error"
 import "linchpin:job"
@@ -39,6 +40,10 @@ ctx : Core_Context
 
 alloc :: proc "c" () -> mem.Allocator {
   return ctx.alloc
+}
+
+delta_tick :: proc "c" () -> u64 {
+  return ctx.delta_tick
 }
 
 fps :: proc "c" () -> f32 {
@@ -79,6 +84,11 @@ frame :: proc() {
   plugin.update(dt)
 
   gfx.execute_command_buffers()
+
+  imgui_api := cast(^imgui.Imgui_Api)private.plugin_api.get_api_by_name("imgui")
+  if imgui_api != nil {
+    imgui_api.Render()
+  }
 
   ctx.frame_idx += 1
 }
@@ -122,9 +132,10 @@ shutdown :: proc() {
 @(init, private)
 init_core_api :: proc() {
   private.core_api = {
+    alloc = alloc,
+    delta_tick = delta_tick,
     fps = fps,
     job_thread_index = job_thread_index,
     num_job_threads = num_job_threads,
-    alloc = alloc,
   }
 }

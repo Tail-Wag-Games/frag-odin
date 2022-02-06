@@ -63,6 +63,7 @@ imgui_api := types.Imgui_Api {
   GetIO = cimgui.igGetIO,
   NewFrame = cimgui.igNewFrame,
   EndFrame = cimgui.igEndFrame,
+  Render = render,
   StyleColorsDark = cimgui.igStyleColorsDark,
   Begin = cimgui.igBegin,
   End = cimgui.igEnd,
@@ -239,7 +240,9 @@ init :: proc() -> Imgui_Error {
 
 frame :: proc() {
   io := imgui_api.GetIO()
-  
+  app_api.window_size(&io.display_size)
+  io.delta_time = f32(sokol.stm_sec(core_api.delta_tick()))
+
   imgui_api.NewFrame()
 }
 
@@ -299,7 +302,7 @@ frag_plugin :: proc(info: ^api.Plugin_Info) {
 }
 
 render :: proc "c" () {
-  
+  cimgui.igRender()
 }
 
 @(init, private)

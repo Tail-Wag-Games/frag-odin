@@ -116,6 +116,15 @@ event_callback :: proc "c" (event: ^sokol.sapp_event) {
 	}
 }
 
+window_size :: proc "c" (size: ^linalg.Vector2f32) {
+	context = runtime.default_context()
+	context.logger = ctx.logger^
+	context.allocator = ctx.alloc
+	
+	assert(size != nil)
+	size^ = ctx.window_size
+}
+
 config :: proc "c" () -> ^api.Config {
 	return &ctx.conf
 }
@@ -270,6 +279,7 @@ init_app_api :: proc() {
   private.app_api = {
 		width = sokol.sapp_width,
 		height = sokol.sapp_height,
+		window_size = window_size,
 		dpi_scale = sokol.sapp_dpi_scale,
 		config = config,
     name = name,
