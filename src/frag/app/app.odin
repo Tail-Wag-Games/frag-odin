@@ -161,12 +161,17 @@ main :: proc() {
 					for _, entry in ta.allocation_map {
 							fmt.eprintf(" %v\n", entry.location)
 					}
+			} else {
+				fmt.println("No Memory Leaks Detected!")
 			}
+			
 			if len(ta.bad_free_array) > 0 {
 					fmt.eprintf("*** Bad Frees Detected ***\n")
 					for entry in ta.bad_free_array {
 							fmt.eprintf(" %v\n", entry.location)
 					}
+			} else {
+				fmt.println("No Bad Frees Detected!")
 			}
 	}
 

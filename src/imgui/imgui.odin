@@ -53,6 +53,7 @@ Imgui_Context :: struct {
 
 imgui_api := types.Imgui_Api {
   CreateContext = cimgui.igCreateContext,
+  DestroyContext = cimgui.igDestroyContext,
   Begin = cimgui.igBegin,
   End = cimgui.igEnd,
   LabelText = cimgui.igLabelText,
@@ -95,9 +96,15 @@ init :: proc() -> Imgui_Error {
   return nil
 }
 
+shutdown :: proc() {
+  imgui_api.DestroyContext(ctx.imgui_ctx)
+}
+
 @(link_name="cr_main")
 @export frag_plugin_main :: proc "c" (plugin: ^api.Plugin, e: api.Plugin_Event) -> i32 {
   context = runtime.default_context()
+  context.allocator = core_api != nil ? core_api.alloc() : context.allocator
+  context.logger = app_api != nil ? app_api.logger()^ : context.logger
 
   switch e {
     case api.Plugin_Event.Load: {
@@ -125,7 +132,7 @@ init :: proc() -> Imgui_Error {
     }
 
     case api.Plugin_Event.Close: {
-
+      shutdown()
     }
   }
   

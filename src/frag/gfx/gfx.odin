@@ -110,6 +110,10 @@ run_command_cbs := [17]Run_Command_Callback {
   run_cb_end_stage,
 }
 
+shader_lang_names := map[string]api.Shader_Lang {
+  "glsl" = api.Shader_Lang.GLSL,
+}
+
 run_cb_end_pass :: proc(buff: []u8, offset: int) -> ([]u8, int) {
   sokol.sg_end_pass()
   return buff, offset
@@ -390,9 +394,33 @@ register_stage :: proc "c" (name: string, parent_stage: api.Gfx_Stage_Handle) ->
 }
 
 parse_shader_reflection_json :: proc(stage_refl_json: []u8, stage_refl_json_len: int) -> ^api.Shader_Reflection_Data {
-  parsed, err := json.parse(stage_refl_json[:stage_refl_json_len])
-  fmt.println(parsed)
-  return nil
+  parsed, err := json.parse(stage_refl_json[:stage_refl_json_len], json.DEFAULT_SPECIFICATION, true)
+  defer json.destroy_value(parsed)
+  
+  obj := parsed.(json.Object)
+  fmt.println(obj)
+
+  stage : api.Shader_Stage
+  if "vs" in obj {
+    stage = .VS
+  } else if "fs" in obj {
+    stage = .FS
+  } else if "cs" in obj {
+    stage = .CS
+  }
+  
+  refl := new(api.Shader_Reflection_Data)
+  refl.lang = shader_lang_names[obj["language"].(string)]
+  refl.stage = stage
+  refl.profile_version = int(obj["profile_version"].(i64))
+  refl.code_type = "bytecode" in obj ? .Bytecode : .Source
+
+  refl.flatten_ubos = "flatten_ubos" in obj
+  refl.source_file = obj[stage == .VS ? "vs" : stage == .FS ? "fs" : "cs"].(json.Object)["file"].(string)
+
+  fmt.println(refl)
+
+  return refl
 }
 
 make_shader_with_data :: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_ref_size: u32, fs_ref_json: [^]u32) -> api.Shader {

@@ -130,12 +130,81 @@ Core_Api :: struct {
 	num_job_threads: proc "c" () -> int,
 }
 
+Shader_Lang :: enum {
+	GLES,
+	HLSL,
+	MSL,
+	GLSL,
+}
+
+Shader_Stage :: enum {
+	VS,
+	FS,
+	CS,
+}
+
+Shader_Code_Type :: enum {
+	Source,
+	Bytecode,
+}
+
+Shader_Input_Reflection_Data :: struct {
+	name: string,
+	semantic: string,
+	semantic_index: int,
+	format: sokol.sg_vertex_format, // for flattened UBOs, array_size must be provided to rendering api w/ type of `FLOAT4`
+}
+
+Shader_Uniform_Buffer_Reflection_Data :: struct {
+	name: string,
+	size_in_bytes: int,
+	binding: int,
+	array_size: int,
+}
+
+Shader_Buffer_Reflection_Data :: struct {
+	name: string,
+	size_in_bytes: int,
+	binding: int,
+	array_stride: int,
+}
+
+Shader_Texture_Reflection_Data :: struct {
+	name: string,
+	binding: int,
+	image_type: sokol.sg_image_type,
+}
+
 Shader_Reflection_Data :: struct {
-	
+	lang: Shader_Lang,
+	stage: Shader_Stage,
+	profile_version: int,
+	source_file: string,
+	inputs: []Shader_Input_Reflection_Data,
+	textures: []Shader_Texture_Reflection_Data,
+	storage_images: []Shader_Texture_Reflection_Data,
+	storage_buffers: []Shader_Buffer_Reflection_Data,
+	uniform_buffers: []Shader_Uniform_Buffer_Reflection_Data,
+	code_type: Shader_Code_Type,
+	flatten_ubos: bool,
 }
 
 Shader_Info :: struct {
+	inputs: [sokol.SG_MAX_VERTEX_ATTRIBUTES]Shader_Input_Reflection_Data,
+	num_inputs: int,
+	name_handle: u32,
+}
 
+Vertex_Attribute :: struct {
+	semantic: string,
+	semantic_index: int,
+	offset: int,
+	format: sokol.sg_vertex_format,
+	buffer_index: int,
+}
+
+Vertex_Layout :: struct {
+	attributes: [sokol.SG_MAX_VERTEX_ATTRIBUTES]Vertex_Attribute,
 }
 
 Shader :: struct {
