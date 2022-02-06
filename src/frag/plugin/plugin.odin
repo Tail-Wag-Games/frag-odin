@@ -214,7 +214,7 @@ init_plugins :: proc() -> error.Error {
     index := ctx.plugin_update_order[i]
     item := &ctx.plugins[index]
 
-    res := cr.plugin_open(&item.p, strings.clone_to_cstring(item.filepath))
+    res := cr.plugin_open(&item.p, strings.clone_to_cstring(item.filepath, context.temp_allocator))
     if !res {
       log.errorf("failed initializing plugin: %s", item.filepath)
       return error.Plugin_Error.Init
@@ -291,7 +291,22 @@ init :: proc(plugin_path: string, app_module: dynlib.Library, allocator := conte
 }
 
 shutdown :: proc() {
+  if ctx.plugins != nil {
+    for i := len(ctx.plugin_update_order) - 1; i >= 0; i -= 1 {
+      index := ctx.plugin_update_order[i]
+      cr.plugin_close(&ctx.plugins[index].p)
+    }
+
+    for i in 0 ..< len(ctx.plugins) {
+      delete(ctx.plugins[i].deps)
+    }
+    delete(ctx.plugins)
+  }
+
   delete(ctx.injected)
+  delete(ctx.plugin_update_order)
+
+  mem.set(&ctx, 0x0, size_of(ctx))
 }
 
 @(init, private)
