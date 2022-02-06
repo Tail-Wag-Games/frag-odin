@@ -16,7 +16,6 @@ import "linchpin:platform"
 
 import "core:dynlib"
 import "core:fmt"
-import "core:log"
 import "core:mem"
 import "core:runtime"
 

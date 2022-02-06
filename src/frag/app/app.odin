@@ -124,6 +124,10 @@ name :: proc "c" () -> string {
 	return ctx.conf.app_name
 }
 
+logger :: proc "c" () -> ^log.Logger {
+	return ctx.logger
+}
+
 print_usage_line :: proc(indent: int, fmt_string: string, args: ..any) {
 	i := indent
 	for i > 0 {
@@ -259,6 +263,7 @@ main :: proc() {
 @(init, private)
 init_app_api :: proc() {
   private.app_api = {
+		logger = logger,
 		width = sokol.sapp_width,
 		height = sokol.sapp_height,
 		config = config,

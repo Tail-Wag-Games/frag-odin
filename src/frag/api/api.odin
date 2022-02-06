@@ -5,7 +5,7 @@ import "thirdparty:sokol"
 import "linchpin:error"
 import "linchpin:memio"
 
-
+import "core:log"
 import "core:mem"
 import "core:runtime"
 
@@ -75,6 +75,7 @@ App_Event :: struct {
 App_Event_Callback :: proc "c" (e: ^App_Event)
 
 App_Api :: struct {
+	logger: proc "c" () -> ^log.Logger,
 	width: proc "c" () -> i32,
 	height: proc "c" () -> i32,
 	config: proc "c" () -> ^Config,
@@ -123,10 +124,19 @@ Core_Flag :: enum {
 Core_Flags :: bit_set[Core_Flag]
 
 Core_Api :: struct {
+	alloc: proc "c" () -> mem.Allocator,
 	fps: proc "c" () -> f32,
 	job_thread_index: proc "c" () -> int,
 	num_job_threads: proc "c" () -> int,
-	alloc: proc "c" () -> mem.Allocator,
+}
+
+Shader_Info :: struct {
+	
+}
+
+Shader :: struct {
+	shd: sokol.sg_shader,
+	info: Shader_Info,
 }
 
 Gfx_Stage_Handle :: struct {
@@ -157,6 +167,7 @@ Gfx_Api :: struct {
 	staged: Gfx_Draw_Api,
 
 	register_stage: proc "c" (name: string, parent_stage: Gfx_Stage_Handle) -> Gfx_Stage_Handle,
+	make_shader_with_data: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_ref_size: u32, fs_ref_json: [^]u32) -> Shader,
 }
 
 Plugin_Event :: enum i32 {

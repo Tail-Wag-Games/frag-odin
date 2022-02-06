@@ -13,3 +13,6 @@
 [submodule "thirdparty/fcontext"]
 	path = thirdparty/fcontext
 	url = git@github.com:Tail-Wag-Games/deboost.context.git
+[submodule "thirdparty/glslcc"]
+	path = thirdparty/glslcc
+	url = git@github.com:Tail-Wag-Games/glslcc.git

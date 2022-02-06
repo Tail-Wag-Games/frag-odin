@@ -5,7 +5,7 @@ import "thirdparty:cimgui"
 import _c "core:c"
 
 Imgui_Api :: struct {
-  // CreateContext : #type proc "c" (shared_font_atlas : ^ImFontAtlas) -> ^ImGuiContext,
+  CreateContext : #type proc "c" (shared_font_atlas : ^cimgui.Font_Atlas) -> ^cimgui.Context,
   // DestroyContext : #type proc "c" (ctx : ^ImGuiContext),
   // GetCurrentContext : #type proc "c" () -> ^ImGuiContext,
   // SetCurrentContext : #type proc "c" (ctx : ^ImGuiContext),

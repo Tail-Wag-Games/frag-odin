@@ -388,6 +388,10 @@ register_stage :: proc "c" (name: string, parent_stage: api.Gfx_Stage_Handle) ->
   return handle
 }
 
+make_shader_with_data :: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_ref_size: u32, fs_ref_json: [^]u32) -> api.Shader {
+  return api.Shader {}
+}
+
 
 on_prepare_shader :: proc (params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
 
@@ -474,6 +478,7 @@ init_gfx_api :: proc() {
       end_pass = end_cb_pass,
     },
     register_stage = register_stage,
+    make_shader_with_data = make_shader_with_data,
   }
 }
 

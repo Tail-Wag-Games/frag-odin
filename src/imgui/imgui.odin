@@ -9,16 +9,22 @@ import "linchpin:pool"
 import "frag:api"
 
 import "./types"
+import "./shaders"
 
 import _c "core:c"
 import "core:c/libc"
+import "core:log"
 import "core:math/linalg"
 import "core:runtime"
 
 MAX_BUFFERED_FRAME_TIMES :: 120
 
+Imgui_Error :: enum {
+  Init,
+}
+
 Imgui_Context :: struct {
-  ctx: ^cimgui.Context,
+  imgui_ctx: ^cimgui.Context,
   small_mem_pool: ^pool.Pool,
   max_verts: int,
   max_indices: int,
@@ -46,6 +52,7 @@ Imgui_Context :: struct {
 
 
 imgui_api := types.Imgui_Api {
+  CreateContext = cimgui.igCreateContext,
   Begin = cimgui.igBegin,
   End = cimgui.igEnd,
   LabelText = cimgui.igLabelText,
@@ -67,10 +74,23 @@ gfx_api : ^api.Gfx_Api
 @(link_section=".state")
 ctx : Imgui_Context
 
-init :: proc() -> error.Error {
+init :: proc() -> Imgui_Error {
   context.allocator = core_api.alloc()
-  
+  context.logger = app_api.logger()^
+
   ctx.docking = app_api.config().imgui_docking
+  ctx.imgui_ctx = imgui_api.CreateContext(nil)
+  if ctx.imgui_ctx == nil {
+    log.error("failed initializing dear imgui")
+    return .Init
+  }
+
+  shader := gfx_api.make_shader_with_data(
+    shaders.imgui_vs_size, &shaders.imgui_vs_data[0], shaders.imgui_vs_refl_size, &shaders.imgui_vs_refl_data[0],
+    shaders.imgui_fs_size, &shaders.imgui_fs_data[0], shaders.imgui_fs_refl_size, &shaders.imgui_fs_refl_data[0],
+  )
+  
+  log.debug("imgui plugin succesfully initialized")
 
   return nil
 }
@@ -86,6 +106,7 @@ init :: proc() -> error.Error {
       gfx_api = cast(^api.Gfx_Api)plugin.api.get_api(api.Api_Type.Gfx)
       app_api = cast(^api.App_Api)plugin.api.get_api(api.Api_Type.App)
 
+      log.debug("initializing imgui plugin...")
       if init() != nil {
         return -1
       }
