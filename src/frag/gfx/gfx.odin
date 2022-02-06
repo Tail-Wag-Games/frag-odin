@@ -15,6 +15,7 @@ import "core:hash"
 import "core:mem"
 import "core:runtime"
 import "core:slice"
+import "core:strings"
 
 Gfx_Command :: enum {
   Begin_Default_Pass,
@@ -112,6 +113,40 @@ run_command_cbs := [17]Run_Command_Callback {
 
 shader_lang_names := map[string]api.Shader_Lang {
   "glsl" = api.Shader_Lang.GLSL,
+  "hlsl" = api.Shader_Lang.HLSL,
+}
+
+shader_stage_keys := map[api.Shader_Stage]string {
+  .VS = "vs",
+  .FS = "fs",
+  .CS = "cs",
+}
+
+vertex_format_names := map[string]sokol.sg_vertex_format {
+  "float" = .SG_VERTEXFORMAT_FLOAT,
+  "float2" = .SG_VERTEXFORMAT_FLOAT2,
+  "float3" = .SG_VERTEXFORMAT_FLOAT3,
+  "float4" = .SG_VERTEXFORMAT_FLOAT,
+  "byte4" = .SG_VERTEXFORMAT_BYTE4,
+  "ubyte4" = .SG_VERTEXFORMAT_UBYTE4,
+  "ubte4n" = .SG_VERTEXFORMAT_UBYTE4N,
+  "short2" = .SG_VERTEXFORMAT_SHORT2,
+  "short2n" = .SG_VERTEXFORMAT_SHORT2N,
+  "short4" = .SG_VERTEXFORMAT_SHORT4,
+  "short4n" = .SG_VERTEXFORMAT_SHORT4N,
+  "uint10n2" = .SG_VERTEXFORMAT_UINT10_N2,
+}
+
+Texture_Type_Name :: struct {
+  name: string,
+  array: bool,
+}
+
+texture_type_names := map[Texture_Type_Name]sokol.sg_image_type {
+  {"2d", true} = .SG_IMAGETYPE_ARRAY,
+  {"2d", false} = .SG_IMAGETYPE_2D,
+  {"3d", false} = .SG_IMAGETYPE_3D,
+  {"3d", true} = .SG_IMAGETYPE_CUBE,
 }
 
 run_cb_end_pass :: proc(buff: []u8, offset: int) -> ([]u8, int) {
@@ -398,15 +433,18 @@ parse_shader_reflection_json :: proc(stage_refl_json: []u8, stage_refl_json_len:
   defer json.destroy_value(parsed)
   
   obj := parsed.(json.Object)
-  fmt.println(obj)
 
   stage : api.Shader_Stage
+  stage_key : string
   if "vs" in obj {
     stage = .VS
+    stage_key = shader_stage_keys[stage]
   } else if "fs" in obj {
     stage = .FS
+    stage_key = shader_stage_keys[stage]
   } else if "cs" in obj {
     stage = .CS
+    stage_key = shader_stage_keys[stage]
   }
   
   refl := new(api.Shader_Reflection_Data)
@@ -414,22 +452,194 @@ parse_shader_reflection_json :: proc(stage_refl_json: []u8, stage_refl_json_len:
   refl.stage = stage
   refl.profile_version = int(obj["profile_version"].(i64))
   refl.code_type = "bytecode" in obj ? .Bytecode : .Source
-
   refl.flatten_ubos = "flatten_ubos" in obj
-  refl.source_file = obj[stage == .VS ? "vs" : stage == .FS ? "fs" : "cs"].(json.Object)["file"].(string)
+  
+  stage_obj := obj[stage_key].(json.Object)
+  refl.source_file = strings.clone(stage_obj["file"].(string), context.temp_allocator)
 
-  fmt.println(refl)
+  if "inputs" in stage_obj {
+    inputs := stage_obj["inputs"].(json.Array)
+    refl.inputs = make([]api.Shader_Input_Reflection_Data, len(inputs))
+    for i in 0 ..< len(inputs) {
+      input := &refl.inputs[i]
+      input_reflection_data := inputs[i].(json.Object)
+      input.name = "name" in input_reflection_data ? strings.clone(input_reflection_data["name"].(string), context.temp_allocator) : ""
+      input.semantic = "semantic" in input_reflection_data ? strings.clone(input_reflection_data["semantic"].(string), context.temp_allocator) : ""
+      input.semantic_index = "semantic_index" in input_reflection_data ? int(input_reflection_data["semantic_index"].(i64)) : 0
+      input.format = "type" in input_reflection_data ? vertex_format_names[input_reflection_data["type"].(string)] : .SG_VERTEXFORMAT_NUM
+    }
+  }
+  
+
+  if "uniform_buffers" in stage_obj {
+    uniform_buffers := stage_obj["uniform_buffers"].(json.Array)
+    refl.uniform_buffers = make([]api.Shader_Uniform_Buffer_Reflection_Data, len(uniform_buffers))
+    for i in 0 ..< len(uniform_buffers) {
+      ubo := &refl.uniform_buffers[i]
+      ubo_reflection_data := uniform_buffers[i].(json.Object)
+      ubo.name = "name" in ubo_reflection_data ? strings.clone(ubo_reflection_data["name"].(string), context.temp_allocator) : ""
+      ubo.size_in_bytes = "block_size" in ubo_reflection_data ? int(ubo_reflection_data["block_size"].(i64)) : 0
+      ubo.binding = "binding" in ubo_reflection_data ? int(ubo_reflection_data["binding"].(i64)) : 0
+      ubo.array_size = "array" in ubo_reflection_data ? int(ubo_reflection_data["array"].(i64)) : 1
+      
+      if ubo.array_size > 1 {
+        assert(refl.flatten_ubos, "array uniform buffers must be generated using --flatten-ubos glscc option")
+      }
+    }
+  }
+
+  if "textures" in stage_obj {
+    textures := stage_obj["textures"].(json.Array)
+    refl.textures = make([]api.Shader_Texture_Reflection_Data, len(textures))
+    for i in 0 ..< len(textures) {
+      texture := &refl.textures[i]
+      texture_reflection_data := textures[i].(json.Object)
+      texture.name = "name" in texture_reflection_data ? strings.clone(texture_reflection_data["name"].(string), context.temp_allocator) : ""
+      texture.binding = "binding" in texture_reflection_data ? int(texture_reflection_data["binding"].(i64)) : 0
+      texture.image_type = "dimension" in texture_reflection_data && "array" in texture_reflection_data ? texture_type_names[{texture_reflection_data["dimension"].(string), texture_reflection_data["array"].(bool)}] : .SG_IMAGETYPE_DEFAULT
+    }
+  }
+
+  if "storage_images" in stage_obj {
+    storage_images := stage_obj["storage_images"].(json.Array)
+    refl.storage_images = make([]api.Shader_Texture_Reflection_Data, len(storage_images))
+    for i in 0 ..< len(storage_images) {
+      storage_image := &refl.storage_images[i]
+      storage_image_reflection_data := storage_images[i].(json.Object)
+      storage_image.name = "name" in storage_image_reflection_data ? strings.clone(storage_image_reflection_data["name"].(string), context.temp_allocator) : ""
+      storage_image.binding = "binding" in storage_image_reflection_data ? int(storage_image_reflection_data["binding"].(i64)) : 0
+      storage_image.image_type = "dimension" in storage_image_reflection_data && "array" in storage_image_reflection_data ? texture_type_names[{storage_image_reflection_data["dimension"].(string), storage_image_reflection_data["array"].(bool)}] : .SG_IMAGETYPE_DEFAULT
+    }
+  }
+
+  if "storage_buffers" in stage_obj {
+    storage_buffers := stage_obj["storage_buffers"].(json.Array)
+    refl.storage_buffers = make([]api.Shader_Buffer_Reflection_Data, len(storage_buffers))
+    for i in 0 ..< len(storage_buffers) {
+      storage_buffer := &refl.storage_buffers[i]
+      storage_buffer_reflection_data := storage_buffers[i].(json.Object)
+      storage_buffer.name = "name" in storage_buffer_reflection_data ? strings.clone(storage_buffer_reflection_data["name"].(string), context.temp_allocator) : ""
+      storage_buffer.size_in_bytes = "block_size" in storage_buffer_reflection_data ? int(storage_buffer_reflection_data["block_size"].(i64)) : 0
+      storage_buffer.binding = "binding" in storage_buffer_reflection_data ? int(storage_buffer_reflection_data["binding"].(i64)) : 0
+      storage_buffer.array_stride = "unsized_array_stride" in storage_buffer_reflection_data ? int(storage_buffer_reflection_data["unsized_array_stride"].(i64)) : 1
+    }
+  }
 
   return refl
 }
 
-make_shader_with_data :: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_ref_size: u32, fs_ref_json: [^]u32) -> api.Shader {
+Shader_Stage_Setup_Desc :: struct {
+  refl: ^api.Shader_Reflection_Data,
+  code: rawptr,
+  code_size: int,
+}
+
+setup_shader_desc :: proc(desc: ^sokol.sg_shader_desc, vs_refl: ^api.Shader_Reflection_Data, vs: rawptr, vs_size: int, fs_refl: ^api.Shader_Reflection_Data, fs: rawptr, fs_size: int, name_handle: ^u32) -> ^sokol.sg_shader_desc {
+  num_stages :: 2
+  stages := [2]Shader_Stage_Setup_Desc{
+    {refl = vs_refl, code = vs, code_size = vs_size},
+    {refl = fs_refl, code = fs, code_size = fs_size},
+  }
+
+  // if name_handle != nil {
+  //   desc.label = core
+  // }
+
+  for i in 0 ..< num_stages {
+    stage := &stages[i]
+    stage_desc : ^sokol.sg_shader_stage_desc = nil
+    #partial switch stage.refl.stage {
+      case .VS: {
+        stage_desc = &desc.vs
+        stage_desc.d3d11_target = "vs_5_0"
+      }
+      case .FS: {
+        stage_desc = &desc.fs
+        stage_desc.d3d11_target = "ps_5_0"
+      }
+      case: {
+        assert(false, "not implemented")
+      }
+    }
+
+    if stage.refl.code_type == .Bytecode {
+      stage_desc.bytecode.ptr = stage.code
+      stage_desc.bytecode.size = uint(stage.code_size)
+    } else if stage.refl.code_type == .Source {
+      stage_desc.source = cast(cstring)stage.code
+    }
+
+    if stage.refl.stage == .VS {
+      for attri in 0 ..< len(vs_refl.inputs) {
+        desc.attrs[attri].sem_name = strings.clone_to_cstring(vs_refl.inputs[attri].semantic, context.temp_allocator)
+        desc.attrs[attri].sem_index = i32(vs_refl.inputs[attri].semantic_index)
+      }
+    }
+
+    for uboi in 0 ..< len(stage.refl.uniform_buffers) {
+      ubord := &stage.refl.uniform_buffers[uboi]
+      ub_desc := &stage_desc.uniform_blocks[ubord.binding]
+      ub_desc.size = uint(ubord.size_in_bytes)
+      if stage.refl.flatten_ubos {
+        ub_desc.uniforms[0].array_count = i32(ubord.array_size)
+        ub_desc.uniforms[0].name = strings.clone_to_cstring(ubord.name, context.temp_allocator)
+        ub_desc.uniforms[0].type = .SG_UNIFORMTYPE_FLOAT4
+      }
+      
+      // NOTE: Individual uniform names are supported by reflection json,
+      //       however they are not being parsed or used here, as d3d/metal shaders don't
+      //       requuire them and for gl/gles, they are always flattened
+    }
+
+    for texi in 0 ..< len(stage.refl.textures) {
+      texrd := &stage.refl.textures[texi]
+      img := &stage_desc.images[texrd.binding]
+      img.name = strings.clone_to_cstring(texrd.name, context.temp_allocator)
+      img.image_type = texrd.image_type
+    }
+
+    // TODO: This is for compute shaders only
+    // for imgi in 0 ..< len(stage.refl.storage_images) {
+    //   imgrd := &stage.refl.storage_images[imgi]
+    //   img := stage_desc.images[imgrd.binding]
+    //   img.name = strings.clone_to_cstring(imgrd.name, context.temp_allocator)
+    //   img.image_type = imgrd.image_type
+    // }
+  }
+
+  return desc
+}
+
+destroy_reflection_data :: proc(refl: ^api.Shader_Reflection_Data) {
+  assert(refl != nil)
+  delete(refl.inputs)
+  delete(refl.textures)
+  delete(refl.storage_images)
+  delete(refl.storage_buffers)
+  delete(refl.uniform_buffers)
+  free(refl)
+}
+
+make_shader_with_data :: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_refl_size: u32, fs_refl_json: [^]u32) -> api.Shader {
   context = runtime.default_context()
   context.allocator = gfx_alloc
 
   desc : sokol.sg_shader_desc
   vs_refl := parse_shader_reflection_json(transmute([]u8)vs_refl_json[:vs_refl_size], int(vs_refl_size) - 1)
-  return api.Shader {}
+  fs_refl := parse_shader_reflection_json(transmute([]u8)fs_refl_json[:fs_refl_size], int(fs_refl_size) - 1)
+
+  s : api.Shader 
+  s = {
+    shd = sokol.sg_make_shader(setup_shader_desc(&desc, vs_refl, vs_data, int(vs_data_size), fs_refl, fs_data, int(fs_data_size), &s.info.name_handle)),
+  }
+  s.info.num_inputs = min(len(vs_refl.inputs), sokol.SG_MAX_VERTEX_ATTRIBUTES)
+  for i in 0 ..< s.info.num_inputs {
+    s.info.inputs[i] = vs_refl.inputs[i]
+  }
+  destroy_reflection_data(vs_refl)
+  destroy_reflection_data(fs_refl)
+
+  return s
 }
 
 
