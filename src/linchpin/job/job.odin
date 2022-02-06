@@ -8,9 +8,10 @@ import "linchpin:platform"
 import "linchpin:pool"
 
 import "core:fmt"
+import "core:mem"
+import "core:runtime"
 import "core:sync"
 import "core:thread"
-import "core:runtime"
 
 Job_Callback :: proc (range_start: int, range_end: int, thread_index: int, user_data: rawptr)
 Job_Thread_Init_Callback :: proc (ctx: ^Job_Context, thread_index: int, thread_id: int, user_data: rawptr)
@@ -69,6 +70,7 @@ Job_Context_Desc :: struct {
 }
 
 Job_Context :: struct {
+  alloc: mem.Allocator,
   threads: []^thread.Thread,
   stack_size: int,
   job_pool: ^pool.Pool,
@@ -141,9 +143,11 @@ select_job :: proc(ctx: ^Job_Context, tid: int) -> (res: Selected_Job) {
 }
 
 job_selector_fn :: proc "c" (transfer: fcontext.FContext_Transfer) {
-  context = runtime.default_context()
-
   ctx := cast(^Job_Context)transfer.data
+  
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+  
   assert(tl_thread_data != nil)
 
   for !ctx.quit {
@@ -176,9 +180,11 @@ job_selector_fn :: proc "c" (transfer: fcontext.FContext_Transfer) {
 }
 
 main_thread_job_selector :: proc "c" (transfer: fcontext.FContext_Transfer) {
-  context = runtime.default_context()
-
   ctx := cast(^Job_Context)transfer.data
+  
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
   assert(tl_thread_data != nil)
 
   j := select_job(ctx, tl_thread_data.tid)
@@ -244,8 +250,9 @@ job_thread_fn :: proc(ctx: ^Job_Context, index: int) {
   }
 }
 
-create_job_context :: proc(desc: ^Job_Context_Desc) -> (res: ^Job_Context, err: error.Error) {
+create_job_context :: proc(desc: ^Job_Context_Desc, alloc := context.allocator) -> (res: ^Job_Context, err: error.Error) {
   res = new(Job_Context) or_return
+  res.alloc = alloc
 
   res.stack_size = desc.fiber_stack_size > 0 ? desc.fiber_stack_size : DEFAULT_FIBER_STACK_SIZE
   res.thread_init_cb = desc.thread_init_cb

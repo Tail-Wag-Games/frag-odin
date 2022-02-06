@@ -1,5 +1,9 @@
 package types
 
+import "thirdparty:cimgui"
+
+import _c "core:c"
+
 Imgui_Api :: struct {
   // CreateContext : #type proc "c" (shared_font_atlas : ^ImFontAtlas) -> ^ImGuiContext,
   // DestroyContext : #type proc "c" (ctx : ^ImGuiContext),
@@ -16,8 +20,8 @@ Imgui_Api :: struct {
   // StyleColorsDark : #type proc "c" (dst : ^ImGuiStyle),
   // StyleColorsLight : #type proc "c" (dst : ^ImGuiStyle),
   // StyleColorsClassic : #type proc "c" (dst : ^ImGuiStyle),
-  // Begin : #type proc "c" (name : cstring, p_open : ^bool, flags : _c.int) -> bool,
-  // End : #type proc "c" (),
+  Begin : #type proc "c" (name : cstring, p_open : ^bool, flags : cimgui.Window_Flags) -> bool,
+  End : #type proc "c" (),
   // BeginChild_Str : #type proc "c" (str_id : cstring, size : ImVec2, border : bool, flags : _c.int) -> bool,
   // BeginChild_ID : #type proc "c" (id : _c.uint, size : ImVec2, border : bool, flags : _c.int) -> bool,
   // EndChild : #type proc "c" (),
@@ -35,7 +39,7 @@ Imgui_Api :: struct {
   // SetNextWindowPos : #type proc "c" (pos : ImVec2, cond : _c.int, pivot : ImVec2),
   // SetNextWindowSize : #type proc "c" (size : ImVec2, cond : _c.int),
   // SetNextWindowSizeConstraints : #type proc "c" (size_min : ImVec2, size_max : ImVec2, customcallback : Size_Callback, customcallback_data : rawptr),
-  // SetNextWindowContentSize : #type proc "c" (size : ImVec2),
+  SetNextWindowContentSize : #type proc "c" (size : cimgui.Vec2),
   // SetNextWindowCollapsed : #type proc "c" (collapsed : bool, cond : _c.int),
   // SetNextWindowFocus : #type proc "c" (),
   // SetNextWindowBgAlpha : #type proc "c" (alpha : _c.float),
@@ -129,7 +133,7 @@ Imgui_Api :: struct {
   // TextDisabledV : #type proc "c" (fmt : cstring, #c_vararg args: ..any),
   // TextWrapped : #type proc "c" (fmt : cstring),
   // TextWrappedV : #type proc "c" (fmt : cstring, #c_vararg args: ..any),
-  // LabelText : #type proc "c" (label : cstring, fmt : cstring),
+  LabelText : #type proc "c" (label : cstring, fmt : cstring, #c_vararg args: ..any),
   // LabelTextV : #type proc "c" (label : cstring, fmt : cstring, #c_vararg args: ..any),
   // BulletText : #type proc "c" (fmt : cstring),
   // BulletTextV : #type proc "c" (fmt : cstring, #c_vararg args: ..any),

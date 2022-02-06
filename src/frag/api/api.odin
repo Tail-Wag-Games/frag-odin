@@ -5,7 +5,43 @@ import "thirdparty:sokol"
 import "linchpin:error"
 import "linchpin:memio"
 
+
+import "core:mem"
 import "core:runtime"
+
+Config :: struct {
+  app_name: string,
+  app_title: string,
+  plugin_path: string,
+  cache_path: string,
+  cwd: string,
+  app_version: u32,
+  app_flags: App_Flags,
+	core_flags: Core_Flags,
+	log_level: runtime.Logger_Level,
+
+  plugins: [MAX_PLUGINS]string,
+  
+  window_width: int,
+  window_height: int,
+	multi_sample_count: int,
+	swap_interval: int,
+	texture_first_mip: int,
+	texture_filter_min: sokol.sg_filter,
+	texture_filter_mag: sokol.sg_filter,
+	texture_aniso: int,
+
+	event_cb: App_Event_Callback,
+
+  num_job_threads: int,
+	max_job_fibers: int,
+	job_stack_size: int,
+
+	num_initial_coro_fibers: int,
+	coro_stack_size: int,
+
+	imgui_docking: bool,
+}
 
 Api_Type :: enum {
 	Core,
@@ -16,13 +52,32 @@ Api_Type :: enum {
 	Asset,
 }
 
+App_Flag :: enum {
+	High_Dpi,
+	Fullscreen,
+	Alpha,
+	Premultiplied_Alpha,
+	Preserve_Drawing_Buffer,
+	Html5_Canvas_Resize,
+	Ios_Keyboard_Resizes_Canvas,
+	User_Corsor,
+	Force_Gles2,
+	Crash_Dump,
+	Resume_Iconified,
+}
+
+App_Flags :: bit_set[App_Flag]
+
 App_Event :: struct {
 	frame_count: u64,
 }
 
+App_Event_Callback :: proc "c" (e: ^App_Event)
+
 App_Api :: struct {
 	width: proc "c" () -> i32,
 	height: proc "c" () -> i32,
+	config: proc "c" () -> ^Config,
 	name: proc "c" () -> string,
 }
 
@@ -56,9 +111,22 @@ Asset_Api :: struct {
 	register_asset_type: proc(name: string, callbacks: Asset_Callbacks),
 }
 
+Core_Flag :: enum {
+	Log_To_File,
+	Log_To_Profiler,
+	Profile_Gpu,
+	Dump_Unused_Assets,
+	Detect_Leaks,
+	Hot_Reload_Plugins,
+}
+
+Core_Flags :: bit_set[Core_Flag]
+
 Core_Api :: struct {
+	fps: proc "c" () -> f32,
 	job_thread_index: proc "c" () -> int,
 	num_job_threads: proc "c" () -> int,
+	alloc: proc "c" () -> mem.Allocator,
 }
 
 Gfx_Stage_Handle :: struct {
@@ -141,6 +209,13 @@ Plugin_Api :: struct {
 Vfs_Api :: struct {
 
 }
+
+PLUGIN_UPDATE_INTERVAL :: f32(1.0)
+MAX_PLUGINS :: 64
+
+MAX_APP_TOUCHPOINTS :: 8
+MAX_APP_MOUSE_BUTTONS :: 3
+MAX_APP_KEY_CODES :: 512
 
 @(private)
 core_api : Core_Api

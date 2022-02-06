@@ -1,6 +1,10 @@
 package imgui
 
 import "thirdparty:cimgui"
+import "thirdparty:sokol"
+
+import "linchpin:error"
+import "linchpin:pool"
 
 import "frag:api"
 
@@ -11,23 +15,41 @@ import "core:c/libc"
 import "core:math/linalg"
 import "core:runtime"
 
+MAX_BUFFERED_FRAME_TIMES :: 120
 
-
-// AnonymousUnion0 :: struct #raw_union {
-//   val_i : _c.int,
-//   val_f : _c.float,
-//   val_p : rawptr,
-// };
-
-// AnonymousUnion1 :: struct #raw_union {
-//   BackupInt : [2]_c.int,
-//   BackupFloat : [2]_c.float,
-// };
-
+Imgui_Context :: struct {
+  ctx: ^cimgui.Context,
+  small_mem_pool: ^pool.Pool,
+  max_verts: int,
+  max_indices: int,
+  verts: [^]cimgui.Draw_Vert,
+  indices: [^]u16,
+  shader: sokol.sg_shader,
+  pip: sokol.sg_pipeline,
+  bind: sokol.sg_bindings,
+  fmt_tex: sokol.sg_image,
+  stage: api.Gfx_Stage_Handle,
+  mouse_btn_down: [api.MAX_APP_MOUSE_BUTTONS]bool,
+  mouse_btn_up: [api.MAX_APP_MOUSE_BUTTONS]bool,
+  mouse_weel_h: f32,
+  mouse_wheel: f32,
+  keys_down: [api.MAX_APP_KEY_CODES]bool,
+  char_input: [dynamic]cimgui.Wchar,
+  last_cursor: cimgui.Mouse_Cursor,
+  sg_imgui: sokol.sg_imgui_t,
+  fts: [MAX_BUFFERED_FRAME_TIMES]f32,
+  ft_iter: i32,
+  ft_iter_nomod: i32,
+  dock_space_id: cimgui.ImID,
+  docking: bool,
+}
 
 
 imgui_api := types.Imgui_Api {
-  
+  Begin = cimgui.igBegin,
+  End = cimgui.igEnd,
+  LabelText = cimgui.igLabelText,
+  SetNextWindowContentSize = cimgui.igSetNextWindowContentSize,
 }
 
 @(link_section=".state")
@@ -42,6 +64,17 @@ app_api : ^api.App_Api
 @(link_section=".state")
 gfx_api : ^api.Gfx_Api
 
+@(link_section=".state")
+ctx : Imgui_Context
+
+init :: proc() -> error.Error {
+  context.allocator = core_api.alloc()
+  
+  ctx.docking = app_api.config().imgui_docking
+
+  return nil
+}
+
 @(link_name="cr_main")
 @export frag_plugin_main :: proc "c" (plugin: ^api.Plugin, e: api.Plugin_Event) -> i32 {
   context = runtime.default_context()
@@ -53,11 +86,17 @@ gfx_api : ^api.Gfx_Api
       gfx_api = cast(^api.Gfx_Api)plugin.api.get_api(api.Api_Type.Gfx)
       app_api = cast(^api.App_Api)plugin.api.get_api(api.Api_Type.App)
 
+      if init() != nil {
+        return -1
+      }
+
       plugin_api.inject_api("imgui", &imgui_api)
+
+      // sokol.sg_imgui_init(&sg_imgui)
     }
 
     case api.Plugin_Event.Step: {
-
+      // sokol.sg_imgui_draw(&sg_imgui)
     }
 
     case api.Plugin_Event.Unload: {

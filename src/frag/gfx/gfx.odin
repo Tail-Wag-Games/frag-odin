@@ -87,6 +87,7 @@ STAGE_ORDER_ID_BITS :: 10
 STAGE_ORDER_ID_MASK :: 0x03ff
 
 ctx : Gfx_Context
+gfx_alloc: mem.Allocator
 
 run_command_cbs := [17]Run_Command_Callback {
   run_cb_begin_default_pass,
@@ -199,6 +200,7 @@ execute_command_buffers :: proc () {
 
 end_cb_stage :: proc "c" () {
   context = runtime.default_context()
+  context.allocator = gfx_alloc
 
   cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
   assert(cb.running_stage.id != 0, "`begin_stage` must be called before `end_stage`")
@@ -227,6 +229,7 @@ make_cb_params_buff :: proc(cb: ^Gfx_Command_Buffer, size: int, offset: ^int) ->
 
 end_cb_pass :: proc "c" () {
   context = runtime.default_context()
+  context.allocator = gfx_alloc
 
   cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
 
@@ -246,6 +249,7 @@ end_cb_pass :: proc "c" () {
 
 begin_cb_default_pass :: proc "c" (pass_action: ^sokol.sg_pass_action, width: i32, height: i32) {
   context = runtime.default_context()
+  context.allocator = gfx_alloc
 
   cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
 
@@ -315,6 +319,7 @@ record_cb_end_stage :: proc() {
 
 begin_cb_stage :: proc "c" (stage_handle: api.Gfx_Stage_Handle) -> bool {
   context = runtime.default_context()
+  context.allocator = gfx_alloc
 
   cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
 
@@ -351,6 +356,7 @@ add_child_stage :: proc(parent, child: api.Gfx_Stage_Handle) {
 
 register_stage :: proc "c" (name: string, parent_stage: api.Gfx_Stage_Handle) -> api.Gfx_Stage_Handle {
   context = runtime.default_context()
+  context.allocator = gfx_alloc
 
   stage := Gfx_Stage {
     name_hash = hash.fnv32a(transmute([]u8)name),
@@ -429,13 +435,20 @@ create_command_buffers :: proc() -> []Gfx_Command_Buffer {
   return cbs
 }
 
-init :: proc(desc: ^sokol.sg_desc) {
+init :: proc(desc: ^sokol.sg_desc, allocator := context.allocator) {
+  gfx_alloc = allocator
+
   sokol.sg_setup(desc)
 
   ctx.cmd_buffers_feed = create_command_buffers()
   ctx.cmd_buffers_render = create_command_buffers()
 
   init_shaders()
+}
+
+shutdown :: proc() {
+  delete(ctx.cmd_buffers_feed)
+  delete(ctx.cmd_buffers_render)
 }
 
 

@@ -26,7 +26,6 @@ SPSC_Queue :: struct {
   iter: int,
   capacity: int,
   stride: int,
-  buff_size: int,
 
   first: ^SPSC_Queue_Node,
   last: lockless.Atomic_Ptr,
@@ -35,19 +34,18 @@ SPSC_Queue :: struct {
   grow_bins: ^SPSC_Queue_Bin,
 }
 
-create_spsc_queue :: proc(item_size: int, capacity: int) -> (res: ^SPSC_Queue, err: error.Error = nil) {
+create_spsc_queue :: proc(item_size: int, capacity: int) -> (^SPSC_Queue, error.Error) {
   assert(item_size > 0)
 
   aligned_capacity := alloc.align_mask(capacity, 15)
 
-  res = new(SPSC_Queue)
-  res.ptrs = make([]^SPSC_Queue_Node, aligned_capacity) or_return
-  res.buff = make([]u8, (item_size + size_of(SPSC_Queue_Node)) * aligned_capacity) or_return
+  res := new(SPSC_Queue)
+  res.ptrs = make([]^SPSC_Queue_Node, aligned_capacity)
+  res.buff = make([]u8, (item_size + size_of(SPSC_Queue_Node)) * aligned_capacity)
 
   res.iter = aligned_capacity
   res.capacity = aligned_capacity
   res.stride = item_size
-  res.buff_size = (item_size + size_of(SPSC_Queue_Node)) * aligned_capacity
 
   for i in 0 ..< aligned_capacity {
     res.ptrs[aligned_capacity - i - 1] =
@@ -62,7 +60,7 @@ create_spsc_queue :: proc(item_size: int, capacity: int) -> (res: ^SPSC_Queue, e
   res.divider = res.last
   res.grow_bins = nil
   
-  return res, err
+  return res, nil
 }
 
 consume_from_spsc_queue :: proc(queue: ^SPSC_Queue, data: rawptr) -> bool {
@@ -76,4 +74,28 @@ consume_from_spsc_queue :: proc(queue: ^SPSC_Queue, data: rawptr) -> bool {
   }
 
   return false
+}
+
+destroy_spsc_queue_bin :: proc(bin: ^SPSC_Queue_Bin) {
+  assert(bin != nil)
+  free(bin)
+}
+
+destroy_spsc_queue :: proc(queue: ^SPSC_Queue) {
+  if queue != nil {
+    if queue.grow_bins != nil {
+      bin := queue.grow_bins
+      for bin != nil {
+        next := bin.next
+        destroy_spsc_queue_bin(bin)
+        bin = next
+      }
+    }
+
+    queue.iter = 0
+    queue.capacity = queue.iter
+    delete(queue.ptrs)
+    delete(queue.buff)
+    free(queue)
+  }
 }

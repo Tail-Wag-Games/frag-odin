@@ -5,6 +5,7 @@ import "frag:private"
 
 import "core:fmt"
 import "core:hash"
+import "core:mem"
 import "core:runtime"
 
 Asset_Manager :: struct {
@@ -14,6 +15,7 @@ Asset_Manager :: struct {
 }
 
 Asset_Context :: struct {
+  alloc: mem.Allocator,
   asset_managers: [dynamic]Asset_Manager,
   asset_name_hashes: [dynamic]u32,
 }
@@ -24,6 +26,7 @@ ctx := Asset_Context{}
 
 register_asset_type :: proc (name: string, callbacks: api.Asset_Callbacks) {
   context = runtime.default_context()
+  context.allocator = ctx.alloc
 
   name_hash := hash.fnv32a(transmute([]u8)name)
 
@@ -43,8 +46,12 @@ register_asset_type :: proc (name: string, callbacks: api.Asset_Callbacks) {
 }
 
 
-init :: proc() {
+init :: proc(allocator := context.allocator) {
+  ctx.alloc = allocator
+}
 
+shutdown :: proc() {
+  delete(ctx.asset_managers)
 }
 
 @(init, private)

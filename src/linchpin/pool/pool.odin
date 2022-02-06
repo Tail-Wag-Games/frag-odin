@@ -67,12 +67,16 @@ destroy_pool :: proc(pool: ^Pool) {
     page := pool.pages.next
     for page != nil {
       next := page.next
+      delete(page.ptrs)
+      delete(page.buff)
       free(page)
       page = next
     }
     pool.capacity = 0
     pool.pages.iter = 0
     pool.pages.next = nil
+    delete(pool.pages.ptrs)
+    delete(pool.pages.buff)
     free(pool)
   }
 }

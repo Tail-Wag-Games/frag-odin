@@ -5,7 +5,7 @@ import "thirdparty:sokol"
 import "linchpin:platform"
 
 import "frag:api"
-import "frag:config"
+
 import "frag:core"
 import "frag:plugin"
 import "frag:private"
@@ -23,7 +23,9 @@ import "core:strings"
 import "core:sys/win32"
 
 App_Context :: struct {
-	conf: config.Config,
+	conf: api.Config,
+	alloc: mem.Allocator,
+	logger: ^log.Logger,
 	app_filepath: string,
 	window_size: linalg.Vector2f32,
 	app_module: dynlib.Library,
@@ -34,11 +36,12 @@ Command :: distinct string
 run : Command : "run"
 
 ctx : App_Context
+ta : mem.Tracking_Allocator
 
 default_name : string
 default_title : string
 default_plugin_path : string
-default_plugins : [config.MAX_PLUGINS]string
+default_plugins : [api.MAX_PLUGINS]string
 
 lit :: proc(str: string) -> (int, string) {
 	return len(str), str
@@ -50,7 +53,8 @@ message_box :: proc(msg: string) {
 
 init_callback :: proc "c" () {
 	context = runtime.default_context()
-	context.logger = log.create_console_logger()
+	context.logger = ctx.logger^
+	context.allocator = ctx.alloc
 
 	if err := core.init(&ctx.conf, ctx.app_module); err != nil {
 		log.errorf("failed initializing core subsystem: %v", err)
@@ -68,7 +72,7 @@ init_callback :: proc "c" () {
 		}
 	}
 
-	if plugin.load_abs(ctx.app_filepath, true, ctx.conf.plugins[:]) != nil {
+	if plugin.load_abs(ctx.app_filepath, true, slice.filter(ctx.conf.plugins[:], proc(x: string) -> bool { return len(x) > 0 })) != nil {
 		log.errorf("failed loading application's shared library at: %s", ctx.app_filepath)
 		message_box("failed loading application's shared library, see log for details")
 		os.exit(1)
@@ -83,14 +87,20 @@ init_callback :: proc "c" () {
 
 frame_callback :: proc "c" () {
 	context = runtime.default_context()
+	context.logger = ctx.logger^
+	context.allocator = ctx.alloc
 
 	core.frame()
 }
 
 cleanup_callback :: proc "c" () {
 	context = runtime.default_context()
+	context.logger = ctx.logger^
+	context.allocator = ctx.alloc
 
+	log.debug("shutting down core subsystem")
 	core.shutdown()
+	log.debug("core subsystem shut down")
 }
 
 event_callback :: proc "c" (event: ^sokol.sapp_event) {
@@ -106,7 +116,10 @@ event_callback :: proc "c" (event: ^sokol.sapp_event) {
 	}
 }
 
-@(private)
+config :: proc "c" () -> ^api.Config {
+	return &ctx.conf
+}
+
 name :: proc "c" () -> string {
 	return ctx.conf.app_name
 }
@@ -134,6 +147,30 @@ usage :: proc(program_name: string) {
 }
 
 main :: proc() {
+	mem.tracking_allocator_init(&ta, context.allocator)
+	ctx.alloc = mem.tracking_allocator(&ta)
+	context.allocator = ctx.alloc
+
+	defer {
+			if len(ta.allocation_map) > 0 {
+					fmt.eprintf("*** Memory Leaks Detected ***\n")
+					for _, entry in ta.allocation_map {
+							fmt.eprintf(" %v\n", entry.location)
+					}
+			}
+			if len(ta.bad_free_array) > 0 {
+					fmt.eprintf("*** Bad Frees Detected ***\n")
+					for entry in ta.bad_free_array {
+							fmt.eprintf(" %v\n", entry.location)
+					}
+			}
+	}
+
+	logger := log.create_console_logger()
+	defer log.destroy_console_logger(&logger)
+	
+	ctx.logger = &logger
+
 	args := os.args
 
 	if len(args) < 2 {
@@ -180,26 +217,39 @@ main :: proc() {
 		os.exit(1)
 	}
 
-	fn := cast(proc(conf: ^config.Config)) ptr
+	fn := cast(proc(conf: ^api.Config)) ptr
 
-	conf := config.Config{}
+	conf := api.Config{}
 	
 	fn(&conf)
 
 	default_name = strings.clone(conf.app_name)
+	defer delete(default_name)
 	conf.app_name = default_name
 	default_title = strings.clone(conf.app_title)
+	defer delete(default_title)
 	conf.app_title = default_title
 	default_plugin_path = strings.clone(conf.plugin_path)
+	defer delete(default_plugin_path)
 	conf.plugin_path = default_plugin_path
 	
-	for i := 0; i < config.MAX_PLUGINS; i += 1 {
+	for i := 0; i < api.MAX_PLUGINS; i += 1 {
 		if len(conf.plugins[i]) == 0 {
 			break
 		}
 
 		default_plugins[i] = strings.clone(conf.plugins[i])
 		conf.plugins[i] = default_plugins[i]
+	}
+
+	defer {
+		for i := 0; i < api.MAX_PLUGINS; i += 1 {
+			if len(default_plugins[i]) == 0 {
+				break
+			}
+	
+			delete(default_plugins[i])
+		}
 	}
 
 	dynlib.unload_library(lib)
@@ -224,6 +274,7 @@ init_app_api :: proc() {
   private.app_api = {
 		width = sokol.sapp_width,
 		height = sokol.sapp_height,
+		config = config,
     name = name,
   }
 }

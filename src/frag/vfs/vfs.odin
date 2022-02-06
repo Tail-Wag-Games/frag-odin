@@ -4,6 +4,7 @@ import "linchpin:error"
 import "linchpin:memio"
 import "linchpin:queue"
 
+import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:sync"
@@ -189,4 +190,21 @@ init :: proc() -> (err: error.Error = nil) {
   ctx.worker_thread = thread.create_and_start(worker_thread_fn)
 
   return err
+}
+
+
+shutdown :: proc() {
+  if ctx.worker_thread != nil {
+    ctx.quit = true
+    sync.semaphore_post(&ctx.worker_sem)
+    thread.destroy(ctx.worker_thread)
+    sync.semaphore_destroy(&ctx.worker_sem)
+  }
+  
+  if ctx.req_queue != nil {
+    queue.destroy_spsc_queue(ctx.req_queue)
+  }
+  if ctx.res_queue != nil {
+    queue.destroy_spsc_queue(ctx.res_queue)
+  }
 }

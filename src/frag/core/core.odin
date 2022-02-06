@@ -3,7 +3,8 @@ package core
 import "thirdparty:sokol"
 
 import "frag:asset"
-import "frag:config"
+
+import "frag:api"
 import "frag:gfx"
 import "frag:plugin"
 import "frag:private"
@@ -16,9 +17,11 @@ import "linchpin:platform"
 import "core:dynlib"
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:runtime"
 
 Core_Context :: struct {
+  alloc: mem.Allocator,
   job_ctx: ^job.Job_Context,
 
   num_threads: int,
@@ -35,8 +38,17 @@ Core_Context :: struct {
 
 ctx : Core_Context
 
+alloc :: proc "c" () -> mem.Allocator {
+  return ctx.alloc
+}
+
+fps :: proc "c" () -> f32 {
+  return ctx.fps_frame
+}
+
 job_thread_index :: proc "c" () -> int {
   context = runtime.default_context()
+  context.allocator = ctx.alloc
 
   return job.thread_index(ctx.job_ctx)
 }
@@ -72,7 +84,9 @@ frame :: proc() {
   ctx.frame_idx += 1
 }
 
-init :: proc(conf: ^config.Config, app_module: dynlib.Library) -> error.Error {
+init :: proc(conf: ^api.Config, app_module: dynlib.Library, allocator := context.allocator) -> error.Error {
+  ctx.alloc = allocator
+
   num_worker_threads := conf.num_job_threads >= 0 ? conf.num_job_threads : platform.num_cores() - 1
   num_worker_threads = max(1, num_worker_threads)
   ctx.num_threads = num_worker_threads + 1
@@ -97,13 +111,21 @@ init :: proc(conf: ^config.Config, app_module: dynlib.Library) -> error.Error {
 }
 
 shutdown :: proc() {
+  plugin.shutdown()
+
   job.destroy_job_context(ctx.job_ctx)
+
+  asset.shutdown()
+  gfx.shutdown()
+  vfs.shutdown()
 }
 
 @(init, private)
 init_core_api :: proc() {
   private.core_api = {
+    fps = fps,
     job_thread_index = job_thread_index,
     num_job_threads = num_job_threads,
+    alloc = alloc,
   }
 }
