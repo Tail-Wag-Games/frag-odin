@@ -223,14 +223,11 @@ main :: proc() {
 	
 	fn(&conf)
 
-	default_name = strings.clone(conf.app_name)
-	defer delete(default_name)
+	default_name = strings.clone(conf.app_name, context.temp_allocator)
 	conf.app_name = default_name
-	default_title = strings.clone(conf.app_title)
-	defer delete(default_title)
+	default_title = strings.clone(conf.app_title, context.temp_allocator)
 	conf.app_title = default_title
-	default_plugin_path = strings.clone(conf.plugin_path)
-	defer delete(default_plugin_path)
+	default_plugin_path = strings.clone(conf.plugin_path, context.temp_allocator)
 	conf.plugin_path = default_plugin_path
 	
 	for i := 0; i < api.MAX_PLUGINS; i += 1 {
@@ -238,18 +235,8 @@ main :: proc() {
 			break
 		}
 
-		default_plugins[i] = strings.clone(conf.plugins[i])
+		default_plugins[i] = strings.clone(conf.plugins[i], context.temp_allocator)
 		conf.plugins[i] = default_plugins[i]
-	}
-
-	defer {
-		for i := 0; i < api.MAX_PLUGINS; i += 1 {
-			if len(default_plugins[i]) == 0 {
-				break
-			}
-	
-			delete(default_plugins[i])
-		}
 	}
 
 	dynlib.unload_library(lib)

@@ -134,14 +134,14 @@ load_binary_file :: proc(path: string) -> (res: ^memio.Mem_Block, err: error.Err
 
 resolve_path :: proc(path: string, flags: VFS_Flags) -> (res: string, err: error.Error = nil) {
   if .Absolute_Path in flags {
-    return filepath.clean(path), nil
+    return filepath.clean(path, context.temp_allocator), nil
   } else {
     for mp in &ctx.mounts {
       if path == mp.alias {
-        return filepath.join(mp.path, filepath.clean(path[len(mp.alias):])), nil
+        return filepath.join(mp.path, filepath.clean(path[len(mp.alias):], context.temp_allocator)), nil
       }
     }
-    res = filepath.clean(path)
+    res = filepath.clean(path, context.temp_allocator)
     return res, os.exists(res) ? nil : .Path_Not_Found
   }
   return "", .Path_Not_Found

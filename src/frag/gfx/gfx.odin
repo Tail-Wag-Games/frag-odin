@@ -446,9 +446,21 @@ init :: proc(desc: ^sokol.sg_desc, allocator := context.allocator) {
   init_shaders()
 }
 
+destroy_buffers :: proc(cbs: []Gfx_Command_Buffer) {
+  for i in 0 ..< private.core_api.num_job_threads() {
+    cb := &cbs[i]
+    assert(cb.running_stage.id == 0)
+    delete(cb.params_buff)
+    delete(cb.refs)
+  }
+}
+
 shutdown :: proc() {
+  destroy_buffers(ctx.cmd_buffers_feed)
+
   delete(ctx.cmd_buffers_feed)
   delete(ctx.cmd_buffers_render)
+  delete(ctx.stages)
 }
 
 

@@ -272,14 +272,14 @@ load :: proc "c" (name: string) -> (err: error.Error = nil) {
   context.allocator = ctx.alloc
 
   assert(!ctx.loaded, "additional plugins cannot be loaded after `init_plugins` has been invoked")
-  return load_abs(strings.concatenate({filepath.join(ctx.plugin_path, name), platform.DLL_EXT}), false, []string {})
+  return load_abs(strings.concatenate({filepath.join(elems={ctx.plugin_path, name}, allocator=context.temp_allocator), platform.DLL_EXT}, context.temp_allocator), false, []string {})
 }
 
 
 init :: proc(plugin_path: string, app_module: dynlib.Library, allocator := context.allocator) -> (err: error.Error = nil) {
   ctx.alloc = allocator
 
-  ctx.plugin_path = filepath.clean(plugin_path)
+  ctx.plugin_path = filepath.clean(plugin_path, context.temp_allocator)
   if !os.is_dir(ctx.plugin_path) {
     err = error.IO_Error.Directory
     return err 

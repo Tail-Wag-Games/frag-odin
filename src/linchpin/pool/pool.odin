@@ -77,6 +77,7 @@ destroy_pool :: proc(pool: ^Pool) {
     pool.pages.next = nil
     delete(pool.pages.ptrs)
     delete(pool.pages.buff)
+    free(pool.pages)
     free(pool)
   }
 }

@@ -52,6 +52,7 @@ init :: proc(allocator := context.allocator) {
 
 shutdown :: proc() {
   delete(ctx.asset_managers)
+  delete(ctx.asset_name_hashes)
 }
 
 @(init, private)
