@@ -130,8 +130,12 @@ Core_Api :: struct {
 	num_job_threads: proc "c" () -> int,
 }
 
-Shader_Info :: struct {
+Shader_Reflection_Data :: struct {
 	
+}
+
+Shader_Info :: struct {
+
 }
 
 Shader :: struct {

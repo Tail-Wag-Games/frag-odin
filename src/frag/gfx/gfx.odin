@@ -9,6 +9,7 @@ import "linchpin:memio"
 import "frag:api"
 import "frag:private"
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:hash"
 import "core:mem"
@@ -388,7 +389,18 @@ register_stage :: proc "c" (name: string, parent_stage: api.Gfx_Stage_Handle) ->
   return handle
 }
 
+parse_shader_reflection_json :: proc(stage_refl_json: []u8, stage_refl_json_len: int) -> ^api.Shader_Reflection_Data {
+  parsed, err := json.parse(stage_refl_json[:stage_refl_json_len])
+  fmt.println(parsed)
+  return nil
+}
+
 make_shader_with_data :: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_ref_size: u32, fs_ref_json: [^]u32) -> api.Shader {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  desc : sokol.sg_shader_desc
+  vs_refl := parse_shader_reflection_json(transmute([]u8)vs_refl_json[:vs_refl_size], int(vs_refl_size) - 1)
   return api.Shader {}
 }
 
