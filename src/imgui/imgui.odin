@@ -61,6 +61,8 @@ imgui_api := types.Imgui_Api {
   CreateContext = cimgui.igCreateContext,
   DestroyContext = cimgui.igDestroyContext,
   GetIO = cimgui.igGetIO,
+  NewFrame = cimgui.igNewFrame,
+  EndFrame = cimgui.igEndFrame,
   StyleColorsDark = cimgui.igStyleColorsDark,
   Begin = cimgui.igBegin,
   End = cimgui.igEnd,
@@ -235,6 +237,12 @@ init :: proc() -> Imgui_Error {
   return nil
 }
 
+frame :: proc() {
+  io := imgui_api.GetIO()
+  
+  imgui_api.NewFrame()
+}
+
 shutdown :: proc() {
   if ctx.imgui_ctx != nil {
     imgui_api.DestroyContext(ctx.imgui_ctx)
@@ -269,7 +277,7 @@ shutdown :: proc() {
     }
 
     case api.Plugin_Event.Step: {
-      // sokol.sg_imgui_draw(&sg_imgui)
+      frame()
     }
 
     case api.Plugin_Event.Unload: {
