@@ -79,6 +79,8 @@ Gfx_Context :: struct {
   stage_lock: lockless.Spinlock,
 
   cur_stage_name: [32]u8,
+
+  last_shader_error: bool,
 }
 
 Run_Command_Callback :: proc(buff: []u8, offset: int) -> ([]u8, int)
@@ -147,6 +149,44 @@ texture_type_names := map[Texture_Type_Name]sokol.sg_image_type {
   {"2d", false} = .SG_IMAGETYPE_2D,
   {"3d", false} = .SG_IMAGETYPE_3D,
   {"3d", true} = .SG_IMAGETYPE_CUBE,
+}
+
+bind_shader_to_sg_pipeline :: proc(shd: sokol.sg_shader, inputs: []api.Shader_Input_Reflection_Data, desc: ^sokol.sg_pipeline_desc, layout: ^api.Vertex_Layout) -> ^sokol.sg_pipeline_desc {
+  desc.shader = shd
+
+  idx := 0
+  attr := &layout.attributes[0]
+  
+  for len(attr.semantic) > 0 && idx < len(inputs) {
+    found := false
+    for i in 0 ..< len(inputs) {
+      if attr.semantic == inputs[i].semantic &&
+        attr.semantic_index == inputs[i].semantic_index {
+          found = true
+
+          desc.layout.attrs[i].offset = i32(attr.offset)
+          desc.layout.attrs[i].format = attr.format != .SG_VERTEXFORMAT_INVALID ? attr.format : inputs[i].format
+          desc.layout.attrs[i].buffer_index = i32(attr.buffer_index)
+          break
+        }
+    }
+
+    if !found {
+      assert(false)
+    }
+
+    idx += 1
+    attr = &layout.attributes[idx]
+  }
+
+  return desc
+}
+
+bind_shader_to_pipeline :: proc "c" (shd: ^api.Shader, desc: ^sokol.sg_pipeline_desc, layout: ^api.Vertex_Layout) -> ^sokol.sg_pipeline_desc {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+  
+  return bind_shader_to_sg_pipeline(shd.shd, shd.info.inputs[:], desc, layout)
 }
 
 run_cb_end_pass :: proc(buff: []u8, offset: int) -> ([]u8, int) {
@@ -428,6 +468,23 @@ register_stage :: proc "c" (name: string, parent_stage: api.Gfx_Stage_Handle) ->
   return handle
 }
 
+make_buffer :: proc "c" (desc: ^sokol.sg_buffer_desc) -> sokol.sg_buffer {
+  buf := sokol.sg_make_buffer(desc)
+  return buf
+}
+
+make_pipeline :: proc "c" (desc: ^sokol.sg_pipeline_desc) -> sokol.sg_pipeline {
+  ctx.last_shader_error = false
+
+  pipeline := sokol.sg_make_pipeline(desc)
+
+  if ctx.last_shader_error {
+
+  }
+
+  return pipeline
+}
+
 parse_shader_reflection_json :: proc(stage_refl_json: []u8, stage_refl_json_len: int) -> ^api.Shader_Reflection_Data {
   parsed, err := json.parse(stage_refl_json[:stage_refl_json_len], json.DEFAULT_SPECIFICATION, true)
   defer json.destroy_value(parsed)
@@ -610,16 +667,6 @@ setup_shader_desc :: proc(desc: ^sokol.sg_shader_desc, vs_refl: ^api.Shader_Refl
   return desc
 }
 
-destroy_reflection_data :: proc(refl: ^api.Shader_Reflection_Data) {
-  assert(refl != nil)
-  delete(refl.inputs)
-  delete(refl.textures)
-  delete(refl.storage_images)
-  delete(refl.storage_buffers)
-  delete(refl.uniform_buffers)
-  free(refl)
-}
-
 make_shader_with_data :: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_refl_size: u32, fs_refl_json: [^]u32) -> api.Shader {
   context = runtime.default_context()
   context.allocator = gfx_alloc
@@ -636,10 +683,34 @@ make_shader_with_data :: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_s
   for i in 0 ..< s.info.num_inputs {
     s.info.inputs[i] = vs_refl.inputs[i]
   }
-  destroy_reflection_data(vs_refl)
-  destroy_reflection_data(fs_refl)
+  destroy_shader_reflection_data(vs_refl)
+  destroy_shader_reflection_data(fs_refl)
 
   return s
+}
+
+destroy_buffer :: proc "c" (buf: sokol.sg_buffer) {
+  // TODO: Queue destruction
+  if buf.id != 0 {
+    sokol.sg_destroy_buffer(buf)
+  }
+}
+
+destroy_shader_reflection_data :: proc(refl: ^api.Shader_Reflection_Data) {
+  assert(refl != nil)
+  delete(refl.inputs)
+  delete(refl.textures)
+  delete(refl.storage_images)
+  delete(refl.storage_buffers)
+  delete(refl.uniform_buffers)
+  free(refl)
+}
+
+destroy_shader :: proc "c" (shd: sokol.sg_shader) {
+  // TODO: Queue destruction
+  if shd.id != 0 {
+    sokol.sg_destroy_shader(shd)
+  }
 }
 
 
@@ -727,8 +798,14 @@ init_gfx_api :: proc() {
       begin_default_pass = begin_cb_default_pass,
       end_pass = end_cb_pass,
     },
-    register_stage = register_stage,
+    make_buffer = make_buffer,
+    make_image = sokol.sg_make_image,
+    make_pipeline = make_pipeline,
+    destroy_buffer = destroy_buffer,
+    destroy_shader = destroy_shader,
     make_shader_with_data = make_shader_with_data,
+    register_stage = register_stage,
+    bind_shader_to_pipeline = bind_shader_to_pipeline,
   }
 }
 

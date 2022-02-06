@@ -268,10 +268,11 @@ main :: proc() {
 @(init, private)
 init_app_api :: proc() {
   private.app_api = {
-		logger = logger,
 		width = sokol.sapp_width,
 		height = sokol.sapp_height,
+		dpi_scale = sokol.sapp_dpi_scale,
 		config = config,
     name = name,
+		logger = logger,
   }
 }
