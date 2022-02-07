@@ -19,6 +19,7 @@ import "core:dynlib"
 import "core:fmt"
 import "core:mem"
 import "core:runtime"
+import "core:strings"
 
 Core_Context :: struct {
   alloc: mem.Allocator,
@@ -98,7 +99,7 @@ frame :: proc() {
 init :: proc(conf: ^api.Config, app_module: dynlib.Library, allocator := context.allocator) -> error.Error {
   ctx.alloc = allocator
 
-  num_worker_threads := conf.num_job_threads >= 0 ? conf.num_job_threads : platform.num_cores() - 1
+  num_worker_threads := conf.num_job_threads >= 0 ? int(conf.num_job_threads) : platform.num_cores() - 1
   num_worker_threads = max(1, num_worker_threads)
   ctx.num_threads = num_worker_threads + 1
 
@@ -116,7 +117,7 @@ init :: proc(conf: ^api.Config, app_module: dynlib.Library, allocator := context
     desc = sokol.sapp_sgcontext(),
   })
 
-  plugin.init(conf.plugin_path, app_module) or_return
+  plugin.init(strings.clone_from_cstring(conf.plugin_path), app_module) or_return
   
   return nil
 }

@@ -72,7 +72,12 @@ init_callback :: proc "c" () {
 		}
 	}
 
-	if plugin.load_abs(ctx.app_filepath, true, slice.filter(ctx.conf.plugins[:], proc(x: string) -> bool { return len(x) > 0 })) != nil {
+	if plugin.load_abs(ctx.app_filepath, 
+		true, 
+		slice.mapper(
+			slice.filter(ctx.conf.plugins[:], proc(x: cstring) -> bool { return len(x) > 0 }), 
+			proc(s: cstring) -> string { return strings.clone_from_cstring(s) }),
+		) != nil {
 		log.errorf("failed loading application's shared library at: %s", ctx.app_filepath)
 		message_box("failed loading application's shared library, see log for details")
 		os.exit(1)
@@ -129,7 +134,7 @@ config :: proc "c" () -> ^api.Config {
 	return &ctx.conf
 }
 
-name :: proc "c" () -> string {
+name :: proc "c" () -> cstring {
 	return ctx.conf.app_name
 }
 
@@ -241,20 +246,20 @@ main :: proc() {
 	
 	fn(&conf)
 
-	default_name = strings.clone(conf.app_name, context.temp_allocator)
-	conf.app_name = default_name
-	default_title = strings.clone(conf.app_title, context.temp_allocator)
-	conf.app_title = default_title
-	default_plugin_path = strings.clone(conf.plugin_path, context.temp_allocator)
-	conf.plugin_path = default_plugin_path
+	default_name = strings.clone_from_cstring(conf.app_name, context.temp_allocator)
+	conf.app_name = transmute(cstring)raw_data(default_name)
+	default_title = strings.clone_from_cstring(conf.app_title, context.temp_allocator)
+	conf.app_title = transmute(cstring)raw_data(default_title)
+	default_plugin_path = strings.clone_from_cstring(conf.plugin_path, context.temp_allocator)
+	conf.plugin_path = transmute(cstring)raw_data(default_plugin_path)
 	
 	for i := 0; i < api.MAX_PLUGINS; i += 1 {
 		if len(conf.plugins[i]) == 0 {
 			break
 		}
 
-		default_plugins[i] = strings.clone(conf.plugins[i], context.temp_allocator)
-		conf.plugins[i] = default_plugins[i]
+		default_plugins[i] = strings.clone_from_cstring(conf.plugins[i], context.temp_allocator)
+		conf.plugins[i] = transmute(cstring)raw_data(default_plugins[i])
 	}
 
 	dynlib.unload_library(lib)
@@ -270,7 +275,7 @@ main :: proc() {
 		event_cb     = event_callback,
 		width        = auto_cast conf.window_width,
 		height       = auto_cast conf.window_height,
-		window_title = strings.clone_to_cstring(conf.app_title, context.temp_allocator),
+		window_title = conf.app_title,
 	})
 }
 

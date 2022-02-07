@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:hash"
 import "core:mem"
 import "core:runtime"
+import "core:strings"
 
 Asset_Manager :: struct {
   name: string,
@@ -24,11 +25,12 @@ Asset_Context :: struct {
 ctx := Asset_Context{}
 
 
-register_asset_type :: proc (name: string, callbacks: api.Asset_Callbacks) {
+register_asset_type :: proc "c" (name: cstring, callbacks: api.Asset_Callbacks) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
-  name_hash := hash.fnv32a(transmute([]u8)name)
+  name_str := strings.clone_from_cstring(name)
+  name_hash := hash.fnv32a(transmute([]u8)name_str)
 
   for asset_name_hash in ctx.asset_name_hashes {
     if name_hash == asset_name_hash {
@@ -38,7 +40,7 @@ register_asset_type :: proc (name: string, callbacks: api.Asset_Callbacks) {
   }
 
   append(&ctx.asset_managers, Asset_Manager{
-    name = name,
+    name = name_str,
     name_hash = name_hash,
     callbacks = callbacks,
   })

@@ -11,40 +11,40 @@ import "core:mem"
 import "core:runtime"
 
 Config :: struct {
-  app_name: string,
-  app_title: string,
-  plugin_path: string,
-  cache_path: string,
-  cwd: string,
+  app_name: cstring,
+  app_title: cstring,
+  plugin_path: cstring,
+  cache_path: cstring,
+  cwd: cstring,
   app_version: u32,
   app_flags: App_Flags,
 	core_flags: Core_Flags,
 	log_level: runtime.Logger_Level,
 
-  plugins: [MAX_PLUGINS]string,
+  plugins: [MAX_PLUGINS]cstring,
   
-  window_width: int,
-  window_height: int,
-	multi_sample_count: int,
-	swap_interval: int,
-	texture_first_mip: int,
+  window_width: i32,
+  window_height: i32,
+	multi_sample_count: i32,
+	swap_interval: i32,
+	texture_first_mip: i32,
 	texture_filter_min: sokol.sg_filter,
 	texture_filter_mag: sokol.sg_filter,
-	texture_aniso: int,
+	texture_aniso: i32,
 
 	event_cb: App_Event_Callback,
 
-  num_job_threads: int,
-	max_job_fibers: int,
-	job_stack_size: int,
+  num_job_threads: i32,
+	max_job_fibers: i32,
+	job_stack_size: i32,
 
-	num_initial_coro_fibers: int,
-	coro_stack_size: int,
+	num_initial_coro_fibers: i32,
+	coro_stack_size: i32,
 
 	imgui_docking: bool,
 }
 
-Api_Type :: enum {
+Api_Type :: enum i32 {
 	Core,
 	Plugin,
 	App,
@@ -178,7 +178,7 @@ Key_Code :: enum i32 {
 	Menu = 348,
 }
 
-App_Flag :: enum {
+App_Flag :: enum i32 {
 	High_Dpi,
 	Fullscreen,
 	Alpha,
@@ -206,7 +206,7 @@ App_Api :: struct {
 	window_size: proc "c" (size: ^linalg.Vector2f32),
 	dpi_scale: proc "c" () -> f32,
 	config: proc "c" () -> ^Config,
-	name: proc "c" () -> string,
+	name: proc "c" () -> cstring,
 	logger: proc "c" () -> ^log.Logger,
 }
 
@@ -220,7 +220,7 @@ Asset_Handle :: struct {
 }
 
 Asset_Load_Params :: struct {
-	path: string,
+	path: cstring,
 	params: any,
 }
 
@@ -237,10 +237,10 @@ Asset_Callbacks :: struct {
 }
 
 Asset_Api :: struct {
-	register_asset_type: proc(name: string, callbacks: Asset_Callbacks),
+	register_asset_type: proc "c" (name: cstring, callbacks: Asset_Callbacks),
 }
 
-Core_Flag :: enum {
+Core_Flag :: enum i32 {
 	Log_To_File,
 	Log_To_Profiler,
 	Profile_Gpu,
@@ -261,20 +261,20 @@ Core_Api :: struct {
 	num_job_threads: proc "c" () -> int,
 }
 
-Shader_Lang :: enum {
+Shader_Lang :: enum i32 {
 	GLES,
 	HLSL,
 	MSL,
 	GLSL,
 }
 
-Shader_Stage :: enum {
+Shader_Stage :: enum i32 {
 	VS,
 	FS,
 	CS,
 }
 
-Shader_Code_Type :: enum {
+Shader_Code_Type :: enum i32 {
 	Source,
 	Bytecode,
 }
@@ -444,14 +444,14 @@ Plugin_Decl_Cb :: proc(info: ^Plugin_Info)
 Plugin_Event_Handler_Callback :: proc(ev: ^App_Event)
 
 Plugin_Api :: struct {
-	load: proc "c" (name: string) -> error.Error,
-	inject_api: proc "c" (name: string, api: rawptr),
+	load: proc "c" (name: cstring) -> error.Error,
+	inject_api: proc "c" (name: cstring, api: rawptr),
 	get_api: proc "c" (kind: Api_Type) -> rawptr,
-	get_api_by_name: proc "c" (name: string) -> rawptr,
+	get_api_by_name: proc "c" (name: cstring) -> rawptr,
 }
 
 Vfs_Api :: struct {
-
+	mount: proc "c" (path: string, alias: string, watch: bool) -> error.Error,
 }
 
 PLUGIN_UPDATE_INTERVAL :: f32(1.0)

@@ -19,6 +19,7 @@ app_api : ^api.App_Api
 gfx_api : ^api.Gfx_Api
 
 ecs_api := types.Ecs_Api {
+  
 }
 
 @(link_name="cr_main")

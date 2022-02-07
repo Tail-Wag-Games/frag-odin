@@ -66,13 +66,13 @@ native_apis := [6]rawptr {
   &private.asset_api,
 }
 
-inject_api :: proc "c" (name: string, api: rawptr) {
+inject_api :: proc "c" (name: cstring, api: rawptr) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
   api_idx := -1
   for injected, i in ctx.injected {
-    if injected.name == name {
+    if transmute(cstring)raw_data(injected.name) == name {
       api_idx = i
       break
     }
@@ -81,7 +81,7 @@ inject_api :: proc "c" (name: string, api: rawptr) {
   if api_idx == -1 {
     item := Injected_Plugin_Api {
       api = api,
-      name = string(name),
+      name = strings.clone_from_cstring(name),
     }
     append(&ctx.injected, item)
   } else {
@@ -89,12 +89,12 @@ inject_api :: proc "c" (name: string, api: rawptr) {
   }
 }
 
-get_api_by_name :: proc "c" (name: string) -> rawptr {
+get_api_by_name :: proc "c" (name: cstring) -> rawptr {
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
   for injected in ctx.injected {
-    if injected.name == name {
+    if transmute(cstring)raw_data(injected.name) == name {
       return injected.api
     }
   }
@@ -252,7 +252,7 @@ load_abs :: proc(filepath: string, entry: bool, deps: []string) -> error.Error {
     decl(&item.info)
   } else {
     dll = ctx.app_module
-    item.info.name = private.app_api.name()
+    item.info.name = strings.clone_from_cstring(private.app_api.name())
   }
 
   item.filepath = filepath
@@ -267,12 +267,12 @@ load_abs :: proc(filepath: string, entry: bool, deps: []string) -> error.Error {
   return nil
 }
 
-load :: proc "c" (name: string) -> (err: error.Error = nil) {
+load :: proc "c" (name: cstring) -> (err: error.Error = nil) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
   assert(!ctx.loaded, "additional plugins cannot be loaded after `init_plugins` has been invoked")
-  return load_abs(strings.concatenate({filepath.join(elems={ctx.plugin_path, name}, allocator=context.temp_allocator), platform.DLL_EXT}, context.temp_allocator), false, []string {})
+  return load_abs(strings.concatenate({filepath.join(elems={ctx.plugin_path, strings.clone_from_cstring(name)}, allocator=context.temp_allocator), platform.DLL_EXT}, context.temp_allocator), false, []string {})
 }
 
 
