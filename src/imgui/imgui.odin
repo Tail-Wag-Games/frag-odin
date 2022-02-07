@@ -20,6 +20,7 @@ import "core:log"
 import "core:mem"
 import "core:math/linalg"
 import "core:runtime"
+import "core:strings"
 
 MAX_VERTS :: 32760   // 32k
 MAX_INDICES :: 98304 // 96k
@@ -138,8 +139,7 @@ init :: proc() -> Imgui_Error {
 
   ini_filename : [64]u8
   conf := imgui_api.GetIO()
-  fmt.bprintf(ini_filename[:], "%s_imgui.ini", app_api.name())
-  conf.ini_filename = transmute(cstring)&ini_filename[0]
+  conf.ini_filename = strings.clone_to_cstring(fmt.tprintf("%s_imgui.ini", app_api.name(), context.temp_allocator), context.temp_allocator)
 
   fb_scale := app_api.dpi_scale()
   conf.display_framebuffer_scale = {fb_scale, fb_scale}

@@ -168,7 +168,7 @@ main :: proc() {
 			if len(ta.allocation_map) > 0 {
 					fmt.eprintf("*** Memory Leaks Detected ***\n")
 					for _, entry in ta.allocation_map {
-							fmt.eprintf(" %v\n", entry.location)
+							fmt.eprintf(" %v\n", entry)
 					}
 			} else {
 				fmt.println("No Memory Leaks Detected!")

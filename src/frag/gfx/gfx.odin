@@ -9,6 +9,7 @@ import "linchpin:memio"
 import "frag:api"
 import "frag:private"
 
+import _c "core:c"
 import "core:encoding/json"
 import "core:fmt"
 import "core:hash"
@@ -582,7 +583,6 @@ parse_shader_reflection_json :: proc(stage_refl_json: []u8, stage_refl_json_len:
     }
   }
 
-  fmt.println(stage_obj["textures"])
   if "textures" in stage_obj {
     textures := stage_obj["textures"].(json.Array)
     refl.textures = make([]api.Shader_Texture_Reflection_Data, len(textures))
@@ -852,6 +852,17 @@ init :: proc(desc: ^sokol.sg_desc, allocator := context.allocator) {
   gfx_alloc = allocator
 
   sokol.sg_setup(desc)
+  sokol.malloc_callback(proc "c" (size: _c.size_t) -> rawptr {
+    context = runtime.default_context()
+    context.allocator = gfx_alloc
+    return mem.alloc(int(size))
+  })
+
+  sokol.free_callback(proc "c" (ptr: rawptr) {
+    context = runtime.default_context()
+    context.allocator = gfx_alloc
+    free(ptr)
+  })
 
   ctx.cmd_buffers_feed = create_command_buffers()
   ctx.cmd_buffers_render = create_command_buffers()
