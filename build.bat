@@ -1,9 +1,5 @@
 @echo off
 
-if exist ".\thirdparty\sokol\sokol.lib" if exist ".\thirdparty\sokol\sokold.lib" goto :SOKOL_CONTINUE
-:SOKOL_BUILD
-call .\thirdparty\sokol\build.bat
-:SOKOL_CONTINUE
 if exist ".\thirdparty\fcontext\fcontext.lib" if exist ".\thirdparty\fcontext\fcontextd.lib" goto :FCONTEXT_CONTINUE
 :FCONTEXT_BUILD
 call .\thirdparty\fcontext\build.bat
@@ -20,6 +16,10 @@ if exist ".\thirdparty\cimgui\cimgui.lib" if exist ".\thirdparty\cimgui\cimguid.
 :IMGUI
 call .\thirdparty\cimgui\build.bat
 :IMGUI_CONTINUE
+if exist ".\thirdparty\sokol\sokol.lib" if exist ".\thirdparty\sokol\sokold.lib" goto :SOKOL_CONTINUE
+:SOKOL_BUILD
+call .\thirdparty\sokol\build.bat
+:SOKOL_CONTINUE
 call odin build src/frag/app/app.odin -debug -out:frag.exe -collection:frag=src/frag -collection:imgui=src/imgui -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
 if NOT %ERRORLEVEL% == 0 goto :EOF
 call thirdparty\glslcc\.build\src\Debug\glslcc.exe -l hlsl --cvar=imgui -o ./src/imgui/shaders/imgui.odin --vert=./src/imgui/imgui.vert -r --frag=./src/imgui/imgui.frag

@@ -15,7 +15,7 @@ Imgui_Api :: struct {
   NewFrame : #type proc "c" (),
   EndFrame : #type proc "c" (),
   Render : #type proc "c" (),
-  // GetDrawData : #type proc "c" () -> ^ImDrawData,
+  GetDrawData : #type proc "c" () -> ^cimgui.Draw_Data,
   // ShowMetricsWindow : #type proc "c" (p_open : ^bool),
   // GetVersion : #type proc "c" () -> cstring,
   StyleColorsDark : #type proc "c" (dst : ^cimgui.Style),

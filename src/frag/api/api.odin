@@ -326,6 +326,26 @@ Shader_Info :: struct {
 	name_handle: u32,
 }
 
+Texture_Info :: struct {
+	name_handle: u32,
+	image_type: sokol.sg_image_type,
+	format: sokol.sg_pixel_format,
+	size_in_bytes: int,
+	width: int,
+	height: int,
+	using dl: struct #raw_union {
+		depth: int,
+		layers: int,
+	},
+	mips: int,
+	bpp: int,
+}
+
+Texture :: struct {
+	img: sokol.sg_image,
+	info: Texture_Info,
+}
+
 Vertex_Attribute :: struct {
 	semantic: string,
 	semantic_index: int,
@@ -353,16 +373,15 @@ Gfx_Draw_Api :: struct {
 
 	begin_default_pass: proc "c" (pass_action: ^sokol.sg_pass_action, width: i32, height: i32),
 	begin_pass: proc "c" (pass: sokol.sg_pass, pass_action: ^sokol.sg_pass_action),
-	apply_viewport: proc "c" (x: int, y: int, width: int, height: int, origin_top_left: bool),
-	apply_scissor_rect: proc "c" (x: int, y: int, width: int, height: int, origin_top_left: bool),
+	apply_viewport: proc "c" (x: i32, y: i32, width: i32, height: i32, origin_top_left: bool),
+	apply_scissor_rect: proc "c" (x: i32, y: i32, width: i32, height: i32, origin_top_left: bool),
 	apply_pipeline: proc "c" (pip: sokol.sg_pipeline),
 	apply_bindings: proc "c" (bind: ^sokol.sg_bindings),
-	apply_uniforms: proc "c" (stage: sokol.sg_shader_stage, ub_index: int, data: rawptr, num_bytes: int),
-	draw: proc "c" (base_element: int, num_elements: int, num_instances: int),
-	dispatch: proc "c" (thread_group_x: int, thread_group_y: int, thread_group_z: int),
+	apply_uniforms: proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, data: ^sokol.sg_range),
+	draw: proc "c" (base_element: i32, num_elements: i32, num_instances: i32),
 	end_pass: proc "c" (),
-	update_buffer: proc "c" (buf: sokol.sg_buffer, data_ptr: rawptr, data_size: int),
-	append_buffer: proc "c" (buf: sokol.sg_buffer, data_ptr: rawptr, data_size: int),
+	update_buffer: proc "c" (buf: sokol.sg_buffer, data : ^sokol.sg_range),
+	append_buffer: proc "c" (buf: sokol.sg_buffer, data : ^sokol.sg_range) -> i32,
 	update_image: proc "c" (img: sokol.sg_image, data: ^sokol.sg_image_data),
 }
 
@@ -378,6 +397,10 @@ Gfx_Api :: struct {
 	make_shader_with_data: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_ref_size: u32, fs_ref_json: [^]u32) -> Shader,
 	register_stage: proc "c" (name: string, parent_stage: Gfx_Stage_Handle) -> Gfx_Stage_Handle,
 	bind_shader_to_pipeline: proc "c" (shd: ^Shader, desc: ^sokol.sg_pipeline_desc, layout: ^Vertex_Layout) -> ^sokol.sg_pipeline_desc,
+
+	texture_white: proc "c" () -> sokol.sg_image,
+	texture_black: proc "c" () -> sokol.sg_image,
+	texture_checker: proc "c" () -> sokol.sg_image,
 }
 
 Plugin_Event :: enum i32 {

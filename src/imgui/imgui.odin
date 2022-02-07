@@ -17,6 +17,7 @@ import _c "core:c"
 import "core:c/libc"
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:math/linalg"
 import "core:runtime"
 
@@ -29,13 +30,18 @@ Imgui_Error :: enum {
   BufferCreation,
 }
 
+Imgui_Shader_Uniforms :: struct {
+  disp_size: linalg.Vector2f32,
+  padding: [2]f32,
+}
+
 Imgui_Context :: struct {
   imgui_ctx: ^cimgui.Context,
   small_mem_pool: ^pool.Pool,
   max_verts: int,
   max_indices: int,
-  verts: []cimgui.Draw_Vert,
-  indices: []u16,
+  verts: [dynamic]cimgui.Draw_Vert,
+  indices: [dynamic]u16,
   shader: sokol.sg_shader,
   pipeline: sokol.sg_pipeline,
   bind: sokol.sg_bindings,
@@ -64,6 +70,7 @@ imgui_api := types.Imgui_Api {
   NewFrame = cimgui.igNewFrame,
   EndFrame = cimgui.igEndFrame,
   Render = render,
+  GetDrawData = cimgui.igGetDrawData,
   StyleColorsDark = cimgui.igStyleColorsDark,
   Begin = cimgui.igBegin,
   End = cimgui.igEnd,
@@ -92,8 +99,8 @@ imgui_vertex_layout : api.Vertex_Layout
 
 
 resize_buffers :: proc(max_verts: int, max_indices: int) -> Imgui_Error {
-  ctx.verts = make([]cimgui.Draw_Vert, max_verts)
-  ctx.indices = make([]u16, max_indices)
+  assert(resize(&ctx.verts, max_verts))
+  assert(resize(&ctx.indices, max_indices))
 
   gfx_api.destroy_buffer(ctx.bind.vertex_buffers[0])
   gfx_api.destroy_buffer(ctx.bind.index_buffer)
@@ -108,7 +115,7 @@ resize_buffers :: proc(max_verts: int, max_indices: int) -> Imgui_Error {
   ctx.bind.index_buffer = gfx_api.make_buffer(&sokol.sg_buffer_desc {
     type = .SG_BUFFERTYPE_INDEXBUFFER,
     usage = .SG_USAGE_STREAM,
-    size = uint(size_of(cimgui.Draw_Vert) * MAX_INDICES),
+    size = uint(size_of(u16) * MAX_INDICES),
     label = "imgui_ibuff",
   })
 
@@ -215,21 +222,6 @@ init :: proc() -> Imgui_Error {
   pipeline_desc.colors[0].blend.dst_factor_rgb = .SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA
 
   ctx.pipeline = gfx_api.make_pipeline(gfx_api.bind_shader_to_pipeline(&shader, &pipeline_desc, &imgui_vertex_layout))
-  // {
-  //   attr := &pipeline_desc.layout.attrs[0];
-  //   attr.offset = offset_of(cimgui.Draw_Vert, pos);
-  //   attr.format = .SG_VERTEXFORMAT_FLOAT2
-  // }
-  // {
-  //   attr := &pipeline_desc.layout.attrs[1];
-  //   attr.offset = offset_of(cimgui.Draw_Vert, uv);
-  //   attr.format = .SG_VERTEXFORMAT_FLOAT2
-  // }
-  // {
-  //   attr := &pipeline_desc.layout.attrs[2];
-  //   attr.offset = offset_of(cimgui.Draw_Vert, col);
-  //   attr.format = .SG_VERTEXFORMAT_FLOAT2
-  // }
 
   ctx.stage = gfx_api.register_stage("imgui", {0})
 
@@ -301,14 +293,131 @@ frag_plugin :: proc(info: ^api.Plugin_Info) {
   info.desc = "dear-imgui plugin"
 }
 
+draw :: proc(data: ^cimgui.Draw_Data) {
+  assert(data != nil)
+  if data.cmd_lists_count == 0 {
+    return
+  }
+
+  num_verts := 0
+  num_indices := 0
+  verts := ctx.verts
+  indices := ctx.indices
+
+  for dlist in 0 ..< data.cmd_lists_count {
+    dl := (cast([^]^cimgui.Draw_List)data.cmd_lists)[dlist]
+    dl_num_verts := dl.vtx_buffer.size
+    dl_num_indices := dl.idx_buffer.size
+
+    max_verts := ctx.max_verts
+    max_indices := ctx.max_indices
+    if int(num_verts + int(dl_num_verts)) > max_verts {
+      log.warnf("imgui: max vertex count: %d - exceeded, growing buffers", ctx.max_verts)
+      max_verts <<= 1
+    }
+    
+    if (num_indices + int(dl_num_indices)) > max_indices {
+      log.warnf("imgui: max index count: %d - exceeded, growing buffers", ctx.max_indices)
+      max_indices <<= 1
+    }
+
+    if max_verts > ctx.max_verts || max_indices > int(ctx.max_indices) {
+      err := resize_buffers(max_verts, max_indices)
+      assert(err == nil, "imgui: vertex and or index buffer creation failed")
+      verts = ctx.verts
+      indices = ctx.indices
+    }
+
+    // mem.copy(&(transmute([]cimgui.Draw_List)verts)[num_verts], dl.vtx_buffer.data, int(dl_num_verts * size_of(cimgui.Draw_Vert)))
+    mem.copy(&verts[num_verts], dl.vtx_buffer.data, int(dl_num_verts * size_of(cimgui.Draw_Vert)))
+
+    src_index_ptr := cast([^]u16)(dl.idx_buffer.data)
+    assert(num_verts <= int(max(u16)))
+    base_vertex_idx := u16(num_verts)
+    for i in 0 ..< dl_num_indices {
+      indices[num_indices] = src_index_ptr[i] + base_vertex_idx
+      num_indices += 1
+    }
+    num_verts += int(dl_num_verts)
+  }
+
+  gfx_api.imm.update_buffer(ctx.bind.vertex_buffers[0], &sokol.sg_range {raw_data(verts), uint(num_verts * size_of(cimgui.Draw_Vert)) })
+  gfx_api.imm.update_buffer(ctx.bind.index_buffer, &sokol.sg_range { raw_data(indices), uint(num_indices * size_of(u16)) })
+
+  io := imgui_api.GetIO()
+  fb_scale := data.framebuffer_scale
+  fb_pos := data.display_pos
+  display_size := linalg.Vector2f32 {io.display_size.x, io.display_size.y}
+
+  uniforms := Imgui_Shader_Uniforms { disp_size = display_size }
+  base_elem := i32(0)
+  last_img : sokol.sg_image
+  ctx.bind.fs_images[0] = gfx_api.texture_white()
+  gfx_api.imm.apply_pipeline(ctx.pipeline)
+  gfx_api.imm.apply_bindings(&ctx.bind)
+  gfx_api.imm.apply_uniforms(.SG_SHADERSTAGE_VS, 0, &sokol.sg_range { &uniforms, size_of(uniforms) })
+
+  for dlist in 0 ..< data.cmd_lists_count {
+    dl := mem.slice_ptr(data.cmd_lists, int(data.cmd_lists_count))[dlist]
+    cmds := mem.slice_ptr(dl.cmd_buffer.data, int(dl.cmd_buffer.size))
+    for cmd in cmds {
+      if cmd.user_callback == nil {
+        clip_rect : linalg.Vector4f32 = {
+          (cmd.clip_rect.x - fb_pos.x) * fb_scale.x,
+          (cmd.clip_rect.y - fb_pos.y) * fb_scale.y,
+          (cmd.clip_rect.z - fb_pos.x) * fb_scale.x,
+          (cmd.clip_rect.w - fb_pos.y) * fb_scale.y,
+        }
+
+        if clip_rect.x < display_size.x*fb_scale.x && clip_rect.y < display_size.y*fb_scale.y && clip_rect.z >= 0.0 && clip_rect.w >= 0.0 {
+          scissor_x := i32(clip_rect.x)
+          scissor_y := i32(clip_rect.y)
+          scissor_w := i32(clip_rect.z - clip_rect.x)
+          scissor_h := i32(clip_rect.w - clip_rect.y)
+
+          tex : sokol.sg_image = {
+            id = u32(uintptr(cmd.texture_id)),
+          }
+          if tex.id != last_img.id {
+            ctx.bind.fs_images[0] = tex
+            gfx_api.imm.apply_bindings(&ctx.bind)
+          }
+          gfx_api.imm.apply_scissor_rect(scissor_x, scissor_y, scissor_w, scissor_h, true)
+          gfx_api.imm.draw(base_elem, i32(cmd.elem_count), 1)
+        }
+      }
+
+      base_elem += i32(cmd.elem_count)
+    }
+  }
+
+}
+
 render :: proc "c" () {
+  context = runtime.default_context()
+  context.allocator = core_api != nil ? core_api.alloc() : context.allocator
+  context.logger = app_api != nil ? app_api.logger()^ : context.logger
+  
   cimgui.igRender()
+
+  action := sokol.sg_pass_action {
+    depth = { action = .SG_ACTION_DONTCARE },
+    stencil = { action = .SG_ACTION_DONTCARE },
+  }
+  action.colors[0] = { action = .SG_ACTION_LOAD }
+
+  if gfx_api.imm.begin(ctx.stage) {
+    gfx_api.imm.begin_default_pass(&action, app_api.width(), app_api.height())
+  }
+  draw(imgui_api.GetDrawData())
+  gfx_api.imm.end_pass()
+  gfx_api.imm.end()
 }
 
 @(init, private)
 init_imgui_plugin :: proc() {
   imgui_vertex_layout.attributes[0] = {semantic = "POSITION", offset = int(offset_of(cimgui.Draw_Vert, pos))}
-  imgui_vertex_layout.attributes[2] = {semantic = "TEXCOORD", offset = int(offset_of(cimgui.Draw_Vert, uv))}
-  imgui_vertex_layout.attributes[2] = {semantic = "Color", offset = int(offset_of(cimgui.Draw_Vert, col)), format = .SG_VERTEXFORMAT_UBYTE4N}
+  imgui_vertex_layout.attributes[1] = {semantic = "TEXCOORD", offset = int(offset_of(cimgui.Draw_Vert, uv))}
+  imgui_vertex_layout.attributes[2] = {semantic = "COLOR", offset = int(offset_of(cimgui.Draw_Vert, col)), format = .SG_VERTEXFORMAT_UBYTE4N}
 }
 

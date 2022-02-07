@@ -17,6 +17,16 @@ import "core:runtime"
 import "core:slice"
 import "core:strings"
 
+Texture_Manager :: struct {
+  white_tex: api.Texture,
+  black_tex: api.Texture,
+  checker_tex: api.Texture,
+  default_min_filter: sokol.sg_filter,
+  default_mag_filter: sokol.sg_filter,
+  default_aniso: int,
+  default_first_mip: int,
+}
+
 Gfx_Command :: enum {
   Begin_Default_Pass,
   Begin_Pass,
@@ -77,6 +87,7 @@ Gfx_Context :: struct {
   cmd_buffers_feed: []Gfx_Command_Buffer,
   cmd_buffers_render: []Gfx_Command_Buffer,
   stage_lock: lockless.Spinlock,
+  tex_mgr: Texture_Manager,
 
   cur_stage_name: [32]u8,
 
@@ -307,6 +318,10 @@ make_cb_params_buff :: proc(cb: ^Gfx_Command_Buffer, size: int, offset: ^int) ->
   return &cb.params_buff[current_len]
 }
 
+end_imm_stage :: proc "c" () {
+
+}
+
 end_cb_pass :: proc "c" () {
   context = runtime.default_context()
   context.allocator = gfx_alloc
@@ -418,6 +433,28 @@ begin_cb_stage :: proc "c" (stage_handle: api.Gfx_Stage_Handle) -> bool {
   lockless.lock_exit(&ctx.stage_lock)
 
   record_cb_begin_stage(transmute(cstring)&stage.name[0], size_of(stage.name))
+
+  return true
+}
+
+begin_imm_stage :: proc "c" (stage_handle: api.Gfx_Stage_Handle) -> bool {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  stage : ^Gfx_Stage
+  stage_name: string
+
+  lockless.lock_enter(&ctx.stage_lock)
+  stage = &ctx.stages[api.to_index(stage_handle.id)]
+  assert(stage.state == .None, "begin was already called on this stage")
+  enabled := stage.enabled
+  if !enabled {
+    lockless.lock_exit(&ctx.stage_lock)
+    return false  
+  }
+  stage.state = .Submitting
+  stage_name = strings.clone_from_bytes(stage.name[:], context.temp_allocator)
+  lockless.lock_exit(&ctx.stage_lock)
 
   return true
 }
@@ -545,6 +582,7 @@ parse_shader_reflection_json :: proc(stage_refl_json: []u8, stage_refl_json_len:
     }
   }
 
+  fmt.println(stage_obj["textures"])
   if "textures" in stage_obj {
     textures := stage_obj["textures"].(json.Array)
     refl.textures = make([]api.Shader_Texture_Reflection_Data, len(textures))
@@ -553,7 +591,12 @@ parse_shader_reflection_json :: proc(stage_refl_json: []u8, stage_refl_json_len:
       texture_reflection_data := textures[i].(json.Object)
       texture.name = "name" in texture_reflection_data ? strings.clone(texture_reflection_data["name"].(string), context.temp_allocator) : ""
       texture.binding = "binding" in texture_reflection_data ? int(texture_reflection_data["binding"].(i64)) : 0
-      texture.image_type = "dimension" in texture_reflection_data && "array" in texture_reflection_data ? texture_type_names[{texture_reflection_data["dimension"].(string), texture_reflection_data["array"].(bool)}] : .SG_IMAGETYPE_DEFAULT
+      texture.image_type = texture_type_names[
+        { 
+          "dimension" in texture_reflection_data ? texture_reflection_data["dimension"].(string) : "", 
+          "array" in texture_reflection_data ? texture_reflection_data["array"].(bool) : false,
+        }
+      ]
     }
   }
 
@@ -564,8 +607,13 @@ parse_shader_reflection_json :: proc(stage_refl_json: []u8, stage_refl_json_len:
       storage_image := &refl.storage_images[i]
       storage_image_reflection_data := storage_images[i].(json.Object)
       storage_image.name = "name" in storage_image_reflection_data ? strings.clone(storage_image_reflection_data["name"].(string), context.temp_allocator) : ""
-      storage_image.binding = "binding" in storage_image_reflection_data ? int(storage_image_reflection_data["binding"].(i64)) : 0
-      storage_image.image_type = "dimension" in storage_image_reflection_data && "array" in storage_image_reflection_data ? texture_type_names[{storage_image_reflection_data["dimension"].(string), storage_image_reflection_data["array"].(bool)}] : .SG_IMAGETYPE_DEFAULT
+      storage_image.binding = "binding" in storage_image_reflection_data ? int(storage_image_reflection_data["binding"].(i64)) : 0      
+      storage_image.image_type = texture_type_names[
+        { 
+          "dimension" in storage_image_reflection_data ? storage_image_reflection_data["dimension"].(string) : "", 
+          "array" in storage_image_reflection_data ? storage_image_reflection_data["array"].(bool) : false,
+        }
+      ]
     }
   }
 
@@ -628,6 +676,7 @@ setup_shader_desc :: proc(desc: ^sokol.sg_shader_desc, vs_refl: ^api.Shader_Refl
 
     if stage.refl.stage == .VS {
       for attri in 0 ..< len(vs_refl.inputs) {
+        desc.attrs[attri].name = strings.clone_to_cstring(vs_refl.inputs[attri].name, context.temp_allocator)
         desc.attrs[attri].sem_name = strings.clone_to_cstring(vs_refl.inputs[attri].semantic, context.temp_allocator)
         desc.attrs[attri].sem_index = i32(vs_refl.inputs[attri].semantic_index)
       }
@@ -749,6 +798,45 @@ init_shaders :: proc() {
   })
 }
 
+texture_white :: proc "c" () -> sokol.sg_image {
+  return ctx.tex_mgr.white_tex.img
+}
+
+texture_black :: proc "c" () -> sokol.sg_image {
+  return ctx.tex_mgr.black_tex.img
+}
+
+init_textures :: proc() {
+  @static white_pixel := u32(0xffffffff)
+  @static black_pixel := u32(0xff000000)
+
+  img_desc := sokol.sg_image_desc {
+    width = 1,
+    height = 1,
+    num_mipmaps = 1,
+    pixel_format = .SG_PIXELFORMAT_RGBA8,
+    label = "frag_white_texture_1x1",
+  }
+  img_desc.data.subimage[0][0].ptr = &white_pixel
+  img_desc.data.subimage[0][0].size = size_of(white_pixel)
+
+  ctx.tex_mgr.white_tex = api.Texture {
+    img = sokol.sg_make_image(&img_desc),
+    info = {
+      image_type = .SG_IMAGETYPE_2D,
+      format = .SG_PIXELFORMAT_RGBA8,
+      size_in_bytes = size_of(white_pixel),
+      width = 1,
+      height = 1,
+      dl = {
+        layers = 1,
+      },
+      mips = 1,
+      bpp = 32,
+    },
+  }
+}
+
 create_command_buffers :: proc() -> []Gfx_Command_Buffer {
   num_threads := private.core_api.num_job_threads()
   cbs := make([]Gfx_Command_Buffer, num_threads)
@@ -768,6 +856,7 @@ init :: proc(desc: ^sokol.sg_desc, allocator := context.allocator) {
   ctx.cmd_buffers_feed = create_command_buffers()
   ctx.cmd_buffers_render = create_command_buffers()
 
+  init_textures()
   init_shaders()
 }
 
@@ -792,6 +881,22 @@ shutdown :: proc() {
 @(init, private)
 init_gfx_api :: proc() {
   private.gfx_api = {
+    imm = {
+      begin = begin_imm_stage,
+      end = end_imm_stage,
+      update_buffer = sokol.sg_update_buffer,
+      update_image = sokol.sg_update_image,
+      append_buffer = sokol.sg_append_buffer,
+      begin_default_pass = sokol.sg_begin_default_pass,
+      begin_pass = sokol.sg_begin_pass,
+      apply_viewport = sokol.sg_apply_viewport,
+      apply_scissor_rect = sokol.sg_apply_scissor_rect,
+      apply_pipeline = sokol.sg_apply_pipeline,
+      apply_bindings = sokol.sg_apply_bindings,
+      apply_uniforms = sokol.sg_apply_uniforms,
+      draw = sokol.sg_draw,
+      end_pass = sokol.sg_end_pass,
+    },
     staged = {
       begin = begin_cb_stage,
       end = end_cb_stage,
@@ -806,6 +911,8 @@ init_gfx_api :: proc() {
     make_shader_with_data = make_shader_with_data,
     register_stage = register_stage,
     bind_shader_to_pipeline = bind_shader_to_pipeline,
+    texture_white = texture_white,
+    texture_black = texture_black,
   }
 }
 

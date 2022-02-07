@@ -90,6 +90,8 @@ frame :: proc() {
     imgui_api.Render()
   }
 
+  sokol.sg_commit()
+
   ctx.frame_idx += 1
 }
 
