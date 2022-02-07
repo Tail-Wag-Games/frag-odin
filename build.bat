@@ -25,6 +25,8 @@ if NOT %ERRORLEVEL% == 0 goto :EOF
 call thirdparty\glslcc\.build\src\Debug\glslcc.exe -l hlsl --cvar=imgui -o ./src/imgui/shaders/imgui.odin --vert=./src/imgui/imgui.vert -r --frag=./src/imgui/imgui.frag
 call odin build src/imgui/imgui.odin -debug -build-mode:dll -out:imgui.dll -collection:frag=src/frag -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
 if NOT %ERRORLEVEL% == 0 goto :EOF
+call odin build src/ecs/ecs.odin -debug -build-mode:dll -out:ecs.dll -collection:frag=src/frag -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
+if NOT %ERRORLEVEL% == 0 goto :EOF
 :FRAG_RUN
 frag %*
 :EOF

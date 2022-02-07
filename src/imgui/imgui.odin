@@ -63,7 +63,6 @@ Imgui_Context :: struct {
   docking: bool,
 }
 
-
 imgui_api := types.Imgui_Api {
   CreateContext = cimgui.igCreateContext,
   DestroyContext = cimgui.igDestroyContext,
