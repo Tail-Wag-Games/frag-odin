@@ -104,7 +104,8 @@ dmon_event_cb :: proc "c" (watch_id: dmon.Watch_Id, action: dmon.Action, rootdir
   #partial switch(action) {
     case .Modify: {
       r : Dmon_Result = { action = action }
-      abs_filepath := filepath.join(strings.clone_from_cstring(rootdir, context.temp_allocator), strings.clone_from_cstring(file, context.temp_allocator))
+      filepath_str := strings.clone_from_cstring(file, context.temp_allocator)
+      abs_filepath := filepath.join(strings.clone_from_cstring(rootdir, context.temp_allocator), filepath_str)
       info, err := os.stat(abs_filepath, context.temp_allocator)
       if err != os.ERROR_NONE {
         break
@@ -112,7 +113,16 @@ dmon_event_cb :: proc "c" (watch_id: dmon.Watch_Id, action: dmon.Action, rootdir
 
       if !info.is_dir && info.size > 0 {
         for mp in &ctx.mounts {
-          fmt.println(mp)
+          if mp.watch_id == watch_id.id {
+            r.path = mp.alias
+            alias_len := len(r.path)
+            r.path = filepath.clean(strings.concatenate({r.path, filepath_str}), context.temp_allocator)
+            break
+          }
+        }
+
+        if bool(r.path[0]) {
+          queue.produce_and_grow_spsc_queue(ctx.dmon_queue)
         }
       }
     }
