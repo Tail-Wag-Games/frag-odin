@@ -259,7 +259,7 @@ main :: proc() {
 		}
 
 		default_plugins[i] = strings.clone_from_cstring(conf.plugins[i], context.temp_allocator)
-		conf.plugins[i] = transmute(cstring)raw_data(default_plugins[i])
+		conf.plugins[i] = strings.clone_to_cstring(default_plugins[i], context.temp_allocator)
 	}
 
 	dynlib.unload_library(lib)

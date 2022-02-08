@@ -49,7 +49,7 @@ Api_Type :: enum i32 {
 	Plugin,
 	App,
 	Gfx,
-	VFS,
+	Vfs,
 	Asset,
 }
 
@@ -257,8 +257,8 @@ Core_Api :: struct {
 	delta_tick: proc "c" () -> u64,
 	fps: proc "c" () -> f32,
 
-	job_thread_index: proc "c" () -> int,
-	num_job_threads: proc "c" () -> int,
+	job_thread_index: proc "c" () -> i32,
+	num_job_threads: proc "c" () -> i32,
 }
 
 Shader_Lang :: enum i32 {

@@ -838,7 +838,7 @@ init_textures :: proc() {
 }
 
 create_command_buffers :: proc() -> []Gfx_Command_Buffer {
-  num_threads := private.core_api.num_job_threads()
+  num_threads := int(private.core_api.num_job_threads())
   cbs := make([]Gfx_Command_Buffer, num_threads)
 
   for i in 0 ..< num_threads {

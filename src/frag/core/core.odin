@@ -51,15 +51,15 @@ fps :: proc "c" () -> f32 {
   return ctx.fps_frame
 }
 
-job_thread_index :: proc "c" () -> int {
+job_thread_index :: proc "c" () -> i32 {
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
-  return job.thread_index(ctx.job_ctx)
+  return i32(job.thread_index(ctx.job_ctx))
 }
 
-num_job_threads :: proc "c" () -> int {
-  return ctx.num_threads
+num_job_threads :: proc "c" () -> i32 {
+  return i32(ctx.num_threads)
 }
 
 frame :: proc() {

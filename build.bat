@@ -20,6 +20,10 @@ if exist ".\thirdparty\sokol\sokol.lib" if exist ".\thirdparty\sokol\sokold.lib"
 :SOKOL_BUILD
 call .\thirdparty\sokol\build.bat
 :SOKOL_CONTINUE
+if exist ".\thirdparty\dmon\dmon.lib" if exist ".\thirdparty\dmon\dmond.lib" goto :DMON_CONTINUE
+:DMON_BUILD
+call .\thirdparty\sokol\build.bat
+:DMON_CONTINUE
 call odin build src/frag/app/app.odin -debug -out:frag.exe -collection:frag=src/frag -collection:imgui=src/imgui -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
 if NOT %ERRORLEVEL% == 0 goto :EOF
 call thirdparty\glslcc\.build\src\Debug\glslcc.exe -l hlsl --cvar=imgui -o ./src/imgui/shaders/imgui.odin --vert=./src/imgui/imgui.vert -r --frag=./src/imgui/imgui.frag

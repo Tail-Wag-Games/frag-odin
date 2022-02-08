@@ -1,5 +1,7 @@
 package vfs
 
+import "thirdparty:dmon"
+
 import "linchpin:error"
 import "linchpin:memio"
 import "linchpin:queue"
@@ -12,6 +14,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:path/slashpath"
 import "core:runtime"
+import "core:strings"
 import "core:sync"
 import "core:thread"
 
@@ -19,6 +22,11 @@ Vfs_Async_Read_Callback :: proc (path: string, mem: ^memio.Mem_Block, user_data:
 Vfs_Async_Write_Callback :: proc (path: string, bytes_written: int, mem: ^memio.Mem_Block, user_data: rawptr)
 
 Vfs_Modify_Async_Callback :: proc (path: string)
+
+Dmon_Result :: struct {
+  action: dmon.Action,
+  path: string,
+}
 
 Vfs_Async_Command :: enum {
   Read,
@@ -89,18 +97,35 @@ Vfs_Context :: struct {
 
 ctx : Vfs_Context
 
+dmon_event_cb :: proc "c" (watch_id: dmon.Watch_Id, action: dmon.Action, rootdir: cstring, path: cstring, old_filepath: cstring, user_data: rawptr) {
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
+  fmt.println(action)
+
+  #partial switch(action) {
+    case .Modify: {
+      r : Dmon_Result = { action = action }
+      abs_filepath := filepath.join(strings.clone_from_cstring(rootdir, context.temp_allocator), strings.clone_from_cstring(path, context.temp_allocator))
+      fmt.println(abs_filepath)
+    }
+  }
+}
+
 mount :: proc "c" (path: string, alias: string, watch: bool) -> error.Error {
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
   if os.is_dir(path) {
-    mp := {
+    mp : Vfs_Mount_Point = {
       path = filepath.clean(path, context.temp_allocator),
       alias = slashpath.clean(alias, context.temp_allocator),
     }
 
     if watch {
-      mp.watch_id = dmon_watch(mp.path, dmon_event_cb, DMON_WATCHFLAGS_RECURSIVE, nil).id
+      fmt.println(mp.path)
+      mp.watch_id = dmon.watch(strings.clone_to_cstring(mp.path), dmon_event_cb, 0x1, nil).id
+      fmt.println(mp.watch_id)
     }
   }
 
@@ -215,6 +240,8 @@ init :: proc(alloc := context.allocator) -> (err: error.Error = nil) {
   sync.semaphore_init(&ctx.worker_sem)
   ctx.worker_thread = thread.create_and_start(worker_thread_fn)
 
+  dmon.init()
+
   return err
 }
 
@@ -233,6 +260,8 @@ shutdown :: proc() {
   if ctx.res_queue != nil {
     queue.destroy_spsc_queue(ctx.res_queue)
   }
+
+  dmon.deinit()
 }
 
 @(init, private)
