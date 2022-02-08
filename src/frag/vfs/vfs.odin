@@ -96,18 +96,25 @@ Vfs_Context :: struct {
 
 
 ctx : Vfs_Context
+dmon_event_cb :: proc "c" (watch_id: dmon.Watch_Id, action: dmon.Action, rootdir: cstring, file: cstring, old_filepath: cstring, user_data: rawptr) {
 
-dmon_event_cb :: proc "c" (watch_id: dmon.Watch_Id, action: dmon.Action, rootdir: cstring, path: cstring, old_filepath: cstring, user_data: rawptr) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
-
-  fmt.println(action)
 
   #partial switch(action) {
     case .Modify: {
       r : Dmon_Result = { action = action }
-      abs_filepath := filepath.join(strings.clone_from_cstring(rootdir, context.temp_allocator), strings.clone_from_cstring(path, context.temp_allocator))
-      fmt.println(abs_filepath)
+      abs_filepath := filepath.join(strings.clone_from_cstring(rootdir, context.temp_allocator), strings.clone_from_cstring(file, context.temp_allocator))
+      info, err := os.stat(abs_filepath, context.temp_allocator)
+      if err != os.ERROR_NONE {
+        break
+      }
+
+      if !info.is_dir && info.size > 0 {
+        for mp in &ctx.mounts {
+          fmt.println(mp)
+        }
+      }
     }
   }
 }

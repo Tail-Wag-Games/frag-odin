@@ -76,7 +76,7 @@ init_callback :: proc "c" () {
 		true, 
 		slice.mapper(
 			slice.filter(ctx.conf.plugins[:], proc(x: cstring) -> bool { return len(x) > 0 }), 
-			proc(s: cstring) -> string { return strings.clone_from_cstring(s) }),
+			proc(s: cstring) -> string { return strings.clone_from_cstring(s, context.temp_allocator) }),
 		) != nil {
 		log.errorf("failed loading application's shared library at: %s", ctx.app_filepath)
 		message_box("failed loading application's shared library, see log for details")

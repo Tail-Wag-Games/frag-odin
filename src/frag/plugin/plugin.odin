@@ -79,10 +79,9 @@ inject_api :: proc "c" (name: cstring, api: rawptr) {
   }
 
   if api_idx == -1 {
-    item := Injected_Plugin_Api {
-      api = api,
-      name = strings.clone_from_cstring(name),
-    }
+    item := Injected_Plugin_Api { api = api, name = strings.string_from_nul_terminated_ptr(transmute(^u8)name, len(name)) }
+    //   name = strings.clone_from_cstring(name, context.temp_allocator),
+    // }
     append(&ctx.injected, item)
   } else {
     ctx.injected[api_idx].api = api
@@ -252,7 +251,7 @@ load_abs :: proc(filepath: string, entry: bool, deps: []string) -> error.Error {
     decl(&item.info)
   } else {
     dll = ctx.app_module
-    item.info.name = strings.clone_from_cstring(private.app_api.name())
+    item.info.name = strings.clone_from_cstring(private.app_api.name(), context.temp_allocator)
   }
 
   item.filepath = filepath
@@ -272,7 +271,7 @@ load :: proc "c" (name: cstring) -> (err: error.Error = nil) {
   context.allocator = ctx.alloc
 
   assert(!ctx.loaded, "additional plugins cannot be loaded after `init_plugins` has been invoked")
-  return load_abs(strings.concatenate({filepath.join(elems={ctx.plugin_path, strings.clone_from_cstring(name)}, allocator=context.temp_allocator), platform.DLL_EXT}, context.temp_allocator), false, []string {})
+  return load_abs(strings.concatenate({filepath.join(elems={ctx.plugin_path, strings.clone_from_cstring(name, context.temp_allocator)}, allocator=context.temp_allocator), platform.DLL_EXT}, context.temp_allocator), false, []string {})
 }
 
 

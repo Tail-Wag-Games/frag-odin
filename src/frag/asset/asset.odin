@@ -29,7 +29,7 @@ register_asset_type :: proc "c" (name: cstring, callbacks: api.Asset_Callbacks) 
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
-  name_str := strings.clone_from_cstring(name)
+  name_str := strings.clone_from_cstring(name, context.temp_allocator)
   name_hash := hash.fnv32a(transmute([]u8)name_str)
 
   for asset_name_hash in ctx.asset_name_hashes {

@@ -233,6 +233,9 @@ frame :: proc() {
   io := imgui_api.GetIO()
   app_api.window_size(&io.display_size)
   io.delta_time = f32(sokol.stm_sec(core_api.delta_tick()))
+  if io.delta_time == 0 {
+    io.delta_time = 0.033
+  }
 
   imgui_api.NewFrame()
 }
