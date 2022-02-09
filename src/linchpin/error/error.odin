@@ -14,10 +14,15 @@ IO_Error :: enum {
   Directory,
 }
 
+Vfs_Error :: enum {
+  Already_Mounted,
+}
+
 Error :: union {
 	runtime.Allocator_Error,
   IO_Error,
   Plugin_Error,
+  Vfs_Error,
 };
 
 error_descriptions := map[Error]string{

@@ -4,7 +4,7 @@ import "thirdparty:dmon"
 
 import "linchpin:error"
 import "linchpin:memio"
-import "linchpin:queue"
+import "linchpin:queue/spsc"
 
 import "frag:private"
 
@@ -84,14 +84,14 @@ Vfs_Mount_Point :: struct {
 
 Vfs_Context :: struct {
   alloc: mem.Allocator,
-  mounts: []Vfs_Mount_Point,
+  mounts: [dynamic]Vfs_Mount_Point,
   modify_cbs: []Vfs_Modify_Async_Callback,
   worker_thread: ^thread.Thread,
-  req_queue: ^queue.SPSC_Queue,
-  res_queue: ^queue.SPSC_Queue,
+  req_queue: ^spsc.Queue,
+  res_queue: ^spsc.Queue,
   worker_sem: sync.Semaphore,
   quit: bool,
-  dmon_queue: ^queue.SPSC_Queue,
+  dmon_queue: ^spsc.Queue,
 }
 
 
@@ -116,13 +116,13 @@ dmon_event_cb :: proc "c" (watch_id: dmon.Watch_Id, action: dmon.Action, rootdir
           if mp.watch_id == watch_id.id {
             r.path = mp.alias
             alias_len := len(r.path)
-            r.path = filepath.clean(strings.concatenate({r.path, filepath_str}), context.temp_allocator)
+            r.path = filepath.clean(filepath.join(r.path, filepath_str))
             break
           }
         }
 
-        if bool(r.path[0]) {
-          queue.produce_and_grow_spsc_queue(ctx.dmon_queue)
+        if r.path != "" {
+          spsc.produce_and_grow(ctx.dmon_queue, &r)
         }
       }
     }
@@ -140,10 +140,19 @@ mount :: proc "c" (path: string, alias: string, watch: bool) -> error.Error {
     }
 
     if watch {
-      fmt.println(mp.path)
       mp.watch_id = dmon.watch(strings.clone_to_cstring(mp.path), dmon_event_cb, 0x1, nil).id
-      fmt.println(mp.watch_id)
     }
+
+    for mnt in ctx.mounts {
+      if mnt.path == mp.path {
+        return .Already_Mounted
+      }
+    }
+
+    append(&ctx.mounts, mp)
+    return nil
+  } else {
+    return .Directory
   }
 
   return nil
@@ -227,7 +236,7 @@ read :: proc(path: string, flags: Vfs_Flags) -> (res: ^memio.Mem_Block, err: err
 worker_thread_fn :: proc(_: ^thread.Thread) {
   for !ctx.quit {
     req : Vfs_Async_Request
-    if queue.consume_from_spsc_queue(ctx.res_queue, &req) {
+    if spsc.consume(ctx.res_queue, &req) {
       res := Vfs_Async_Response{bytes_written = -1}
       res.path = req.path
       res.user_data = req.user_data
@@ -251,13 +260,14 @@ worker_thread_fn :: proc(_: ^thread.Thread) {
 init :: proc(alloc := context.allocator) -> (err: error.Error = nil) {
   ctx.alloc = alloc
 
-  ctx.req_queue = queue.create_spsc_queue(size_of(Vfs_Async_Request), 128) or_return
-  ctx.res_queue = queue.create_spsc_queue(size_of(Vfs_Async_Response), 128) or_return
+  ctx.req_queue = spsc.create(size_of(Vfs_Async_Request), 128) or_return
+  ctx.res_queue = spsc.create(size_of(Vfs_Async_Response), 128) or_return
 
   sync.semaphore_init(&ctx.worker_sem)
   ctx.worker_thread = thread.create_and_start(worker_thread_fn)
 
   dmon.init()
+  ctx.dmon_queue = spsc.create(size_of(Dmon_Result), 128) or_return
 
   return err
 }
@@ -272,13 +282,17 @@ shutdown :: proc() {
   }
   
   if ctx.req_queue != nil {
-    queue.destroy_spsc_queue(ctx.req_queue)
+    spsc.destroy(ctx.req_queue)
   }
   if ctx.res_queue != nil {
-    queue.destroy_spsc_queue(ctx.res_queue)
+    spsc.destroy(ctx.res_queue)
   }
 
   dmon.deinit()
+
+  if ctx.dmon_queue != nil {
+    spsc.destroy(ctx.dmon_queue)
+  }
 }
 
 @(init, private)
