@@ -1,7 +1,9 @@
 package app
 
+import "thirdparty:getopt"
 import "thirdparty:sokol"
 
+import "linchpin:cmdline"
 import "linchpin:platform"
 
 import "frag:api"
@@ -22,12 +24,23 @@ import "core:slice"
 import "core:strings"
 import "core:sys/win32"
 
+Command_Line_Item :: struct {
+	name: cstring,
+	allocated_value: bool,
+	using vp: struct #raw_union {
+		value: [8]u8,
+		value_ptr: ^u8,
+	},
+}
+
 App_Context :: struct {
 	conf: api.Config,
 	alloc: mem.Allocator,
 	logger: ^log.Logger,
 	app_filepath: string,
 	window_size: linalg.Vector2f32,
+	cmd_line_args: [dynamic]getopt.Option,
+	cmd_line_items: [dynamic]Command_Line_Item,
 	app_module: dynlib.Library,
 }
 
@@ -38,10 +51,10 @@ run : Command : "run"
 ctx : App_Context
 ta : mem.Tracking_Allocator
 
-default_name : string
-default_title : string
-default_plugin_path : string
-default_plugins : [api.MAX_PLUGINS]string
+default_name: [64]u8
+default_title: [64]u8
+default_plugin_path: [128]u8
+default_plugins : [api.MAX_PLUGINS][32]u8
 
 lit :: proc(str: string) -> (int, string) {
 	return len(str), str
@@ -49,6 +62,35 @@ lit :: proc(str: string) -> (int, string) {
 
 message_box :: proc(msg: string) {
   win32.message_box_a(nil, strings.clone_to_cstring(msg, context.temp_allocator), "frag", win32.MB_OK|win32.MB_ICONERROR)
+}
+
+parse_command_line :: proc () {
+	for arg in ctx.cmd_line_args {
+		
+	}
+}
+
+register_command_line_arg :: proc "c" (name: cstring, short_name: u8, opt_type: getopt.Option_Type, desc: cstring, value_desc: cstring) {
+	context = runtime.default_context()
+	context.logger = ctx.logger^
+	context.allocator = ctx.alloc
+
+	for i in 0 ..< len(ctx.cmd_line_items) {
+		opt := &ctx.cmd_line_args[i]
+		if opt.name == name {
+			assert(false, fmt.tprintf("command-line argument with name: %s - already registered", name))
+			return
+		}
+	}
+
+	append(&ctx.cmd_line_args, getopt.Option {
+		name = name,
+		short_name = i32(short_name),
+		option_type = opt_type,
+		value = 1,
+		desc = desc,
+		value_desc = value_desc,
+	})
 }
 
 init_callback :: proc "c" () {
@@ -194,32 +236,63 @@ main :: proc() {
 	
 	ctx.logger = &logger
 
-	args := os.args
-
-	if len(args) < 2 {
-		usage(args[0])
-		os.exit(1)
-	}
-
 	sokol.stm_setup()
 
+	opts := []getopt.Option {
+		{"run", 'r', .Required, nil, 'r', "game or application module to run", "filepath"},
+		getopt.OPTIONS_END,
+	}
+
+	args := slice.mapper(
+		os.args, 
+		proc(s: string) -> cstring { return strings.clone_to_cstring(s, context.temp_allocator) })
+
+	// args_copy := cstring(raw_data(args))
+	cmdline_ctx := cmdline.create_context(i32(len(args)), &args[0], &opts[0])
+
+	arg : cstring
 	app_filepath : string
-	switch command := Command(args[1]); command {
-		case run:
-			if len(args) < 3 {
-				usage(args[0])
+	cwd: string
+	opt := cmdline.next(cmdline_ctx, nil, &arg)
+	for opt != -1 {
+		switch opt {
+			case i32('+'): {
+				message_box(fmt.tprintf("missing flag for argument: %s", strings.clone_from_cstring(arg, context.temp_allocator)))
+			}
+			case i32('!'): {
+				message_box(fmt.tprintf("invalid argument usage: %s", strings.clone_from_cstring(arg, context.temp_allocator)))
 				os.exit(1)
 			}
-
-			app_filepath = args[2]
-		case:
-			usage(args[0])
-			os.exit(1)
+			case i32('r'): {
+				app_filepath = strings.clone_from_cstring(arg, context.temp_allocator)
+			}
+			case i32('c'): {
+				cwd = strings.clone_from_cstring(arg, context.temp_allocator)
+			}
+			case: {
+				break
+			}
+		}
+		opt = cmdline.next(cmdline_ctx, nil, &arg)
 	}
+
+	// app_filepath : string
+	// switch command := Command(args[1]); command {
+	// 	case run:
+	// 		if len(args) < 3 {
+	// 			usage(args[0])
+	// 			os.exit(1)
+	// 		}
+
+	// 		app_filepath = args[2]
+	// 	case:
+	// 		usage(args[0])
+	// 		os.exit(1)
+	// }
 
 	if len(app_filepath) == 0 {
 		message_box("Must provide path to frag plugin defining application entry point, as argument to 'run' command!")
-		usage(args[0])
+		usage(string(args[0]))
 		os.exit(1)
 	}
 
@@ -240,26 +313,28 @@ main :: proc() {
 		os.exit(1)
 	}
 
-	fn := cast(proc(conf: ^api.Config)) ptr
+	fn := cast(proc(conf: ^api.Config, cb: api.Register_Command_Line_Arg_Cb)) ptr
 
 	conf := api.Config{}
 	
-	fn(&conf)
+	fn(&conf, register_command_line_arg)
+	
+	mem.copy(&default_name[0], transmute(rawptr)conf.app_name, len(conf.app_name))
+	conf.app_name = transmute(cstring)raw_data(&default_name)
 
-	default_name = strings.clone_from_cstring(conf.app_name, context.temp_allocator)
-	conf.app_name = strings.clone_to_cstring(default_name, context.temp_allocator)
-	default_title = strings.clone_from_cstring(conf.app_title, context.temp_allocator)
-	conf.app_title = strings.clone_to_cstring(default_title, context.temp_allocator)
-	default_plugin_path = strings.clone_from_cstring(conf.plugin_path, context.temp_allocator)
-	conf.plugin_path = strings.clone_to_cstring(default_plugin_path, context.temp_allocator)
+	mem.copy(&default_title[0], transmute(rawptr)conf.app_title, len(conf.app_title))
+	conf.app_title = transmute(cstring)raw_data(&default_title)
+
+	mem.copy(&default_plugin_path[0], transmute(rawptr)conf.plugin_path, len(conf.plugin_path))
+	conf.plugin_path = transmute(cstring)raw_data(&default_plugin_path)
 	
 	for i := 0; i < api.MAX_PLUGINS; i += 1 {
 		if len(conf.plugins[i]) == 0 {
 			break
 		}
 
-		default_plugins[i] = strings.clone_from_cstring(conf.plugins[i], context.temp_allocator)
-		conf.plugins[i] = strings.clone_to_cstring(default_plugins[i], context.temp_allocator)
+		mem.copy(&default_plugins[i][0], transmute(rawptr)conf.plugins[i], len(conf.plugins[i]))
+		conf.plugins[i] = transmute(cstring)&default_plugins[i][0]
 	}
 
 	dynlib.unload_library(lib)
@@ -268,8 +343,6 @@ main :: proc() {
 	ctx.app_filepath = app_filepath
 	ctx.window_size = {f32(conf.window_width), f32(conf.window_height)}
 
-	fmt.println(default_title)
-	fmt.println(conf.app_title)
 	sokol.sapp_run(&sokol.sapp_desc{
 		init_cb      = init_callback,
 		frame_cb     = frame_callback,

@@ -19,3 +19,6 @@
 [submodule "thirdparty/dmon"]
 	path = thirdparty/dmon
 	url = git@github.com:Tail-Wag-Games/dmon.git
+[submodule "thirdparty/getopt"]
+	path = thirdparty/getopt
+	url = git@github.com:Tail-Wag-Games/getopt.git

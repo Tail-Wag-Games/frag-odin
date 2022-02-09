@@ -6,6 +6,7 @@ import "frag:private"
 import "core:fmt"
 import "core:hash"
 import "core:mem"
+import "core:path/slashpath"
 import "core:runtime"
 import "core:strings"
 
@@ -24,6 +25,12 @@ Asset_Context :: struct {
 
 ctx := Asset_Context{}
 
+on_asset_modified :: proc "c" (path: cstring) {
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
+  unix_path := slashpath.clean(strings.clone_from_cstring(path, context.temp_allocator))
+}
 
 register_asset_type :: proc "c" (name: cstring, callbacks: api.Asset_Callbacks) {
   context = runtime.default_context()
@@ -50,6 +57,8 @@ register_asset_type :: proc "c" (name: cstring, callbacks: api.Asset_Callbacks) 
 
 init :: proc(allocator := context.allocator) {
   ctx.alloc = allocator
+
+  private.vfs_api.register_modify_cb(on_asset_modified)
 }
 
 shutdown :: proc() {

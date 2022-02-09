@@ -1,5 +1,6 @@
 package api
 
+import "thirdparty:getopt"
 import "thirdparty:sokol"
 
 import "linchpin:error"
@@ -41,7 +42,8 @@ Config :: struct {
 	num_initial_coro_fibers: i32,
 	coro_stack_size: i32,
 
-	imgui_docking: bool,
+	imgui_docking: 
+	bool,
 }
 
 Api_Type :: enum i32 {
@@ -199,6 +201,7 @@ App_Event :: struct {
 }
 
 App_Event_Callback :: proc "c" (e: ^App_Event)
+Register_Command_Line_Arg_Cb :: proc "c" (name: cstring, short_name: u8, opt_type: getopt.Option_Type, desc: cstring, value_desc: cstring)
 
 App_Api :: struct {
 	width: proc "c" () -> i32,
@@ -452,6 +455,7 @@ Plugin_Api :: struct {
 
 Vfs_Api :: struct {
 	mount: proc "c" (path: string, alias: string, watch: bool) -> error.Error,
+	register_modify_cb: proc "c" (modify_cb: proc "c" (path: cstring)),
 }
 
 PLUGIN_UPDATE_INTERVAL :: f32(1.0)

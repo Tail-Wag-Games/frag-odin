@@ -1,5 +1,9 @@
 @echo off
 
+if exist ".\thirdparty\getopt\getopt.lib" if exist ".\thirdparty\getopt\getoptd.lib" goto :GETOPT_CONTINUE
+:GETOPT_BUILD
+call .\thirdparty\getopt\build.bat
+:GETOPT_CONTINUE
 if exist ".\thirdparty\fcontext\fcontext.lib" if exist ".\thirdparty\fcontext\fcontextd.lib" goto :FCONTEXT_CONTINUE
 :FCONTEXT_BUILD
 call .\thirdparty\fcontext\build.bat

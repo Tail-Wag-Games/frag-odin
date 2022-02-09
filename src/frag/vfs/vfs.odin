@@ -6,6 +6,7 @@ import "linchpin:error"
 import "linchpin:memio"
 import "linchpin:queue/spsc"
 
+import "frag:api"
 import "frag:private"
 
 import "core:fmt"
@@ -18,74 +19,72 @@ import "core:strings"
 import "core:sync"
 import "core:thread"
 
-Vfs_Async_Read_Callback :: proc (path: string, mem: ^memio.Mem_Block, user_data: rawptr)
-Vfs_Async_Write_Callback :: proc (path: string, bytes_written: int, mem: ^memio.Mem_Block, user_data: rawptr)
-
-Vfs_Modify_Async_Callback :: proc (path: string)
+Async_Read_Callback :: proc (path: string, mem: ^memio.Mem_Block, user_data: rawptr)
+Async_Write_Callback :: proc (path: string, bytes_written: int, mem: ^memio.Mem_Block, user_data: rawptr)
 
 Dmon_Result :: struct {
   action: dmon.Action,
   path: string,
 }
 
-Vfs_Async_Command :: enum {
+Async_Command :: enum {
   Read,
   Write,
 }
 
-Vfs_Response_Code :: enum {
+Response_Code :: enum {
   Read_Failed,
   Read_Ok,
   Write_Failed,
   Write_Ok,
 }
 
-Vfs_Flag :: enum {
+Flag :: enum {
   None,
   Absolute_Path,
   Text_File,
   Append,
 }
 
-Vfs_Flags :: bit_set[Vfs_Flag]
+Flags :: bit_set[Flag]
 
-Vfs_Async_Request :: struct {
-  command: Vfs_Async_Command,
-  flags: Vfs_Flags,
+Async_Request :: struct {
+  command: Async_Command,
+  flags: Flags,
   path: string,
   write_mem: ^memio.Mem_Block,
   using rw: struct #raw_union {
-    read_fn: Vfs_Async_Read_Callback,
-    write_fn: Vfs_Async_Write_Callback,
+    read_fn: Async_Read_Callback,
+    write_fn: Async_Write_Callback,
   },
   user_data: rawptr,
 }
 
-Vfs_Async_Response :: struct {
-  code: Vfs_Response_Code,
+Async_Response :: struct {
+  code: Response_Code,
   using rw_mem: struct #raw_union {
     read_mem: ^memio.Mem_Block,
     write_mem: ^memio.Mem_Block,
   },
   using rw_cb: struct #raw_union {
-    read_fn: Vfs_Async_Read_Callback,
-    write_fn: Vfs_Async_Write_Callback,
+    read_fn: Async_Read_Callback,
+    write_fn: Async_Write_Callback,
   },
   user_data: rawptr,
   bytes_written: int,
   path: string,
 }
 
-Vfs_Mount_Point :: struct {
+Mount_Point :: struct {
   path: string,
   alias: string,
   watch_id: u32,
 }
 
-Vfs_Context :: struct {
+Context :: struct {
   alloc: mem.Allocator,
-  mounts: [dynamic]Vfs_Mount_Point,
-  modify_cbs: []Vfs_Modify_Async_Callback,
+  mounts: [dynamic]Mount_Point,
+  modify_cbs: [dynamic]proc "c" (path: cstring),
   worker_thread: ^thread.Thread,
   req_queue: ^spsc.Queue,
   res_queue: ^spsc.Queue,
@@ -95,9 +94,8 @@ Vfs_Context :: struct {
 }
 
 
-ctx : Vfs_Context
+ctx : Context
 dmon_event_cb :: proc "c" (watch_id: dmon.Watch_Id, action: dmon.Action, rootdir: cstring, file: cstring, old_filepath: cstring, user_data: rawptr) {
-
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
@@ -129,12 +127,20 @@ dmon_event_cb :: proc "c" (watch_id: dmon.Watch_Id, action: dmon.Action, rootdir
   }
 }
 
+register_modify_cb :: proc "c" (modify_cb: proc "c" (path: cstring)) {
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
+  assert(modify_cb != nil)
+  append(&ctx.modify_cbs, modify_cb)
+}
+
 mount :: proc "c" (path: string, alias: string, watch: bool) -> error.Error {
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
   if os.is_dir(path) {
-    mp : Vfs_Mount_Point = {
+    mp : Mount_Point = {
       path = filepath.clean(path, context.temp_allocator),
       alias = slashpath.clean(alias, context.temp_allocator),
     }
@@ -207,7 +213,7 @@ load_binary_file :: proc(path: string) -> (res: ^memio.Mem_Block, err: error.Err
 }
 
 
-resolve_path :: proc(path: string, flags: Vfs_Flags) -> (res: string, err: error.Error = nil) {
+resolve_path :: proc(path: string, flags: Flags) -> (res: string, err: error.Error = nil) {
   if .Absolute_Path in flags {
     return filepath.clean(path, context.temp_allocator), nil
   } else {
@@ -223,7 +229,7 @@ resolve_path :: proc(path: string, flags: Vfs_Flags) -> (res: string, err: error
 }
 
 
-read :: proc(path: string, flags: Vfs_Flags) -> (res: ^memio.Mem_Block, err: error.Error = nil) {
+read :: proc(path: string, flags: Flags) -> (res: ^memio.Mem_Block, err: error.Error = nil) {
   resolved_path := resolve_path(path, flags) or_return
   if .Text_File in flags {
     return load_text_file(resolved_path) or_return, nil
@@ -235,9 +241,9 @@ read :: proc(path: string, flags: Vfs_Flags) -> (res: ^memio.Mem_Block, err: err
 
 worker_thread_fn :: proc(_: ^thread.Thread) {
   for !ctx.quit {
-    req : Vfs_Async_Request
+    req : Async_Request
     if spsc.consume(ctx.res_queue, &req) {
-      res := Vfs_Async_Response{bytes_written = -1}
+      res := Async_Response{bytes_written = -1}
       res.path = req.path
       res.user_data = req.user_data
 
@@ -250,8 +256,33 @@ worker_thread_fn :: proc(_: ^thread.Thread) {
           } else {
             res.code = .Read_Failed
           }
+          spsc.produce_and_grow(ctx.res_queue, &res)
         case .Write:
           res.write_fn = req.write_fn
+      }
+    }
+    sync.semaphore_wait_for(&ctx.worker_sem)
+  }
+}
+
+update :: proc() {
+  res : Async_Response
+  for spsc.consume(ctx.res_queue, &res) {
+    switch res.code {
+      case .Read_Ok, .Read_Failed: {
+        res.read_fn(res.path, res.read_mem, res.user_data)
+      }
+      case .Write_Ok, .Write_Failed: {
+        res.write_fn(res.path, res.bytes_written, res.write_mem, res.user_data)
+      }
+    }
+  }
+
+  dmon_res: Dmon_Result
+  for spsc.consume(ctx.dmon_queue, &dmon_res) {
+    if dmon_res.action == .Modify {
+      for i in 0 ..< len(ctx.modify_cbs) {
+        ctx.modify_cbs[i](strings.clone_to_cstring(dmon_res.path, context.temp_allocator))
       }
     }
   }
@@ -260,8 +291,8 @@ worker_thread_fn :: proc(_: ^thread.Thread) {
 init :: proc(alloc := context.allocator) -> (err: error.Error = nil) {
   ctx.alloc = alloc
 
-  ctx.req_queue = spsc.create(size_of(Vfs_Async_Request), 128) or_return
-  ctx.res_queue = spsc.create(size_of(Vfs_Async_Response), 128) or_return
+  ctx.req_queue = spsc.create(size_of(Async_Request), 128) or_return
+  ctx.res_queue = spsc.create(size_of(Async_Response), 128) or_return
 
   sync.semaphore_init(&ctx.worker_sem)
   ctx.worker_thread = thread.create_and_start(worker_thread_fn)
@@ -299,5 +330,6 @@ shutdown :: proc() {
 init_vfs_api :: proc() {
   private.vfs_api = {
     mount = mount,
+    register_modify_cb = register_modify_cb,
   }
 }
