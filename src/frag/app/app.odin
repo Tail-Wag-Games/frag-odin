@@ -247,11 +247,11 @@ main :: proc() {
 	fn(&conf)
 
 	default_name = strings.clone_from_cstring(conf.app_name, context.temp_allocator)
-	conf.app_name = transmute(cstring)raw_data(default_name)
+	conf.app_name = strings.clone_to_cstring(default_name, context.temp_allocator)
 	default_title = strings.clone_from_cstring(conf.app_title, context.temp_allocator)
-	conf.app_title = transmute(cstring)raw_data(default_title)
+	conf.app_title = strings.clone_to_cstring(default_title, context.temp_allocator)
 	default_plugin_path = strings.clone_from_cstring(conf.plugin_path, context.temp_allocator)
-	conf.plugin_path = transmute(cstring)raw_data(default_plugin_path)
+	conf.plugin_path = strings.clone_to_cstring(default_plugin_path, context.temp_allocator)
 	
 	for i := 0; i < api.MAX_PLUGINS; i += 1 {
 		if len(conf.plugins[i]) == 0 {
@@ -268,6 +268,8 @@ main :: proc() {
 	ctx.app_filepath = app_filepath
 	ctx.window_size = {f32(conf.window_width), f32(conf.window_height)}
 
+	fmt.println(default_title)
+	fmt.println(conf.app_title)
 	sokol.sapp_run(&sokol.sapp_desc{
 		init_cb      = init_callback,
 		frame_cb     = frame_callback,
