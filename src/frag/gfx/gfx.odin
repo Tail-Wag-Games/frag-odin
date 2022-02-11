@@ -357,6 +357,35 @@ end_cb_pass :: proc "c" () {
   cb.cmd_idx += 1
 }
 
+apply_cb_uniforms :: proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, range: ^sokol.sg_range) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
+
+  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
+  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
+
+  offset := 0
+  buff := make_cb_params_buff(cb, size_of(sokol.sg_shader_stage) + size_of(i32) * 2 + int(range.size), &offset)
+
+  ref := Gfx_Command_Buffer_Ref {
+    key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
+    cmd_buffer_idx = cb.index,
+    cmd = .Apply_Uniforms,
+    params_offset = len(cb.params_buff),
+  }
+  append(&cb.refs, ref)
+
+  cb.cmd_idx += 1
+
+  (cast(^sokol.sg_shader_stage)buff)^ = stage
+  buff = mem.ptr_offset(buff, size_of(sokol.sg_shader_stage))
+  (cast(^i32)buff)^ = ub_index
+  buff = mem.ptr_offset(buff, size_of(i32))
+  mem.copy(buff, range, size_of(range^))
+}
+
 begin_cb_pass :: proc "c" (pass: sokol.sg_pass, pass_action: ^sokol.sg_pass_action) {
   context = runtime.default_context()
   context.allocator = gfx_alloc
@@ -367,7 +396,7 @@ begin_cb_pass :: proc "c" (pass: sokol.sg_pass, pass_action: ^sokol.sg_pass_acti
   assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
 
   offset := 0
-  buff := make_cb_params_buff(cb, size_of(sokol.sg_pass_action) + size_of(i32) * 2, &offset)
+  buff := make_cb_params_buff(cb, size_of(sokol.sg_pass_action) + size_of(sokol.sg_pass), &offset)
 
   ref := Gfx_Command_Buffer_Ref {
     key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
@@ -1109,6 +1138,9 @@ init_gfx_api :: proc() {
       end = end_cb_stage,
       begin_default_pass = begin_cb_default_pass,
       begin_pass = begin_cb_pass,
+      apply_pipeline = apply_cb_pipeline,
+      apply_bindings = apply_cb_bindings,
+      apply_uniforms = apply_cb_uniforms,
       end_pass = end_cb_pass,
     },
     make_buffer = make_buffer,
