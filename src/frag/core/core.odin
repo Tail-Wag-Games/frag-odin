@@ -51,6 +51,10 @@ fps :: proc "c" () -> f32 {
   return ctx.fps_frame
 }
 
+frame_index :: proc "c" () -> i64 {
+  return ctx.frame_idx
+}
+
 job_thread_index :: proc "c" () -> i32 {
   context = runtime.default_context()
   context.allocator = ctx.alloc
@@ -81,6 +85,8 @@ frame :: proc() {
     ctx.fps_mean = f32(afps)
     ctx.fps_frame = f32(fps)
   }
+
+  gfx.update()
 
   plugin.update(dt)
 
@@ -138,6 +144,7 @@ init_core_api :: proc() {
     alloc = alloc,
     delta_tick = delta_tick,
     fps = fps,
+    frame_index = frame_index,
     job_thread_index = job_thread_index,
     num_job_threads = num_job_threads,
   }

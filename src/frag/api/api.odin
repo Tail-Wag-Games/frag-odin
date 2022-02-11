@@ -208,6 +208,8 @@ App_Api :: struct {
 	height: proc "c" () -> i32,
 	window_size: proc "c" (size: ^linalg.Vector2f32),
 	dpi_scale: proc "c" () -> f32,
+	command_line_arg_exists: proc "c" (name: cstring) -> bool,
+	command_line_arg_value: proc "c" (name: cstring) -> cstring,
 	config: proc "c" () -> ^Config,
 	name: proc "c" () -> cstring,
 	logger: proc "c" () -> ^log.Logger,
@@ -259,6 +261,7 @@ Core_Api :: struct {
 
 	delta_tick: proc "c" () -> u64,
 	fps: proc "c" () -> f32,
+	frame_index: proc "c" () -> i64,
 
 	job_thread_index: proc "c" () -> i32,
 	num_job_threads: proc "c" () -> i32,
@@ -397,6 +400,9 @@ Gfx_Api :: struct {
 	make_image : proc "c" (desc: ^sokol.sg_image_desc) -> sokol.sg_image,
 	destroy_buffer: proc "c" (buf: sokol.sg_buffer),
 	destroy_shader: proc "c" (shd: sokol.sg_shader),
+	destroy_pipeline: proc "c" (pip: sokol.sg_pipeline),
+	destroy_pass : proc "c" (pass: sokol.sg_pass),
+	destroy_image: proc "c" (img: sokol.sg_image),
 	make_shader_with_data: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_ref_size: u32, fs_ref_json: [^]u32) -> Shader,
 	register_stage: proc "c" (name: string, parent_stage: Gfx_Stage_Handle) -> Gfx_Stage_Handle,
 	bind_shader_to_pipeline: proc "c" (shd: ^Shader, desc: ^sokol.sg_pipeline_desc, layout: ^Vertex_Layout) -> ^sokol.sg_pipeline_desc,
@@ -454,7 +460,7 @@ Plugin_Api :: struct {
 }
 
 Vfs_Api :: struct {
-	mount: proc "c" (path: string, alias: string, watch: bool) -> error.Error,
+	mount: proc "c" (path: cstring, alias: cstring, watch: bool) -> error.Error,
 	register_modify_cb: proc "c" (modify_cb: proc "c" (path: cstring)),
 }
 

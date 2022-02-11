@@ -64,6 +64,12 @@ Gfx_Command_Buffer :: struct {
   cmd_idx: u16,
 }
 
+Gfx_Stream_Buffer :: struct {
+  buffer: sokol.sg_buffer,
+  offset: lockless.atomic_u32,
+  size: int,
+}
+
 Gfx_Stage_State :: enum {
   None,
   Submitting,
@@ -89,6 +95,14 @@ Gfx_Context :: struct {
   cmd_buffers_render: []Gfx_Command_Buffer,
   stage_lock: lockless.Spinlock,
   tex_mgr: Texture_Manager,
+  pipelines: [dynamic]sokol.sg_pipeline,
+  stream_buffers: [dynamic]Gfx_Stream_Buffer,
+
+  doomed_buffers: [dynamic]sokol.sg_buffer,
+  doomed_shaders: [dynamic]sokol.sg_shader,
+  doomed_pipelines: [dynamic]sokol.sg_pipeline,
+  doomed_passes: [dynamic]sokol.sg_pass,
+  doomed_images: [dynamic]sokol.sg_image,
 
   cur_stage_name: [32]u8,
 
@@ -739,9 +753,11 @@ make_shader_with_data :: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_s
 }
 
 destroy_buffer :: proc "c" (buf: sokol.sg_buffer) {
-  // TODO: Queue destruction
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
   if buf.id != 0 {
-    sokol.sg_destroy_buffer(buf)
+    queue_destruction(&ctx.doomed_buffers, buf)
   }
 }
 
@@ -756,12 +772,40 @@ destroy_shader_reflection_data :: proc(refl: ^api.Shader_Reflection_Data) {
 }
 
 destroy_shader :: proc "c" (shd: sokol.sg_shader) {
-  // TODO: Queue destruction
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
   if shd.id != 0 {
-    sokol.sg_destroy_shader(shd)
+    queue_destruction(&ctx.doomed_shaders, shd)
   }
 }
 
+destroy_pipeline :: proc "c" (pip: sokol.sg_pipeline) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  if pip.id != 0 {
+    queue_destruction(&ctx.doomed_pipelines, pip)
+  }
+}
+
+destroy_pass :: proc "c" (pass: sokol.sg_pass) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  if pass.id != 0 {
+    queue_destruction(&ctx.doomed_passes, pass)
+  }
+}
+
+destroy_image :: proc "c" (img: sokol.sg_image) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  if img.id != 0 {
+    queue_destruction(&ctx.doomed_images, img)
+  }
+}
 
 on_prepare_shader :: proc (params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
 
@@ -880,14 +924,137 @@ destroy_buffers :: proc(cbs: []Gfx_Command_Buffer) {
   }
 }
 
+destroy_textures :: proc() {
+  if ctx.tex_mgr.white_tex.img.id > 0 {
+    destroy_image(ctx.tex_mgr.white_tex.img)
+  }
+  if ctx.tex_mgr.black_tex.img.id > 0 {
+    destroy_image(ctx.tex_mgr.black_tex.img)
+  }
+  if ctx.tex_mgr.checker_tex.img.id > 0 {
+    destroy_image(ctx.tex_mgr.checker_tex.img)
+  }
+}
+
+update :: proc() {
+  collect_garbage(private.core_api.frame_index())
+}
+
+collect_garbage :: proc(frame: i64) {
+  // check frames and destroy objects if they are past 1 frame
+  // the reason is because the _staged_ API executes commands one frame after their calls:
+  //          frame #1
+  // <--------------------->
+  //      staged->destroy
+  //    execute queued cmds |->      frame #2
+  //                        <---------------------->
+  //
+
+  // buffers
+  i := 0
+  c := len(ctx.doomed_buffers)
+  for ; i < c; i += 1 {
+    buffer := ctx.doomed_buffers[i]
+    buffer_lookup_result := sokol.sg_lookup_buffer(buffer.id)
+    if frame > buffer_lookup_result.used_frame + 1 {
+      if buffer_lookup_result.usage == .SG_USAGE_STREAM {
+        for ii in 0 ..< len(ctx.stream_buffers) {
+          if ctx.stream_buffers[ii].buffer.id == buffer.id {
+            ordered_remove(&ctx.stream_buffers, ii)
+            break
+          }
+        }
+      }
+      sokol.sg_destroy_buffer(buffer)
+      ordered_remove(&ctx.doomed_buffers, i)
+      i -= 1
+      c -= 1
+    }
+  }
+
+  // pipelines
+  i = 0
+  c = len(ctx.doomed_pipelines)
+  for ; i < c; i += 1 {
+    pipeline := ctx.doomed_pipelines[i]
+    pipeline_lookup_result := sokol.sg_lookup_pipeline(pipeline.id)
+    if frame > pipeline_lookup_result.used_frame + 1 {
+      for ii in 0 ..< len(ctx.pipelines) {
+        if ctx.pipelines[ii].id == pipeline.id {
+          ordered_remove(&ctx.pipelines, ii)
+          break
+        }
+      }
+      sokol.sg_destroy_pipeline(pipeline)
+      ordered_remove(&ctx.doomed_pipelines, i)
+      i -= 1
+      c -= 1
+    }
+  }
+
+  // shaders
+  i = 0
+  c = len(ctx.doomed_shaders)
+  for ; i < c; i += 1 {
+    shader := ctx.doomed_shaders[i]
+    shader_lookup_result := sokol.sg_lookup_shader(shader.id)
+    if shader_lookup_result.found && frame > shader_lookup_result.used_frame + 1 {
+      sokol.sg_destroy_shader(shader)
+      ordered_remove(&ctx.doomed_shaders, i)
+      i -= 1
+      c -= 1
+    } else {
+      // TODO (FIXME): crash happened where shd became NULL when we reloaded the shaders
+      ordered_remove(&ctx.doomed_shaders, i)
+      i -= 1
+      c -= 1
+    }
+  }
+
+  // passes
+  i = 0
+  c = len(ctx.doomed_passes)
+  for ; i < c; i += 1 {
+    pass := ctx.doomed_passes[i]
+    pass_lookup_result := sokol.sg_lookup_pass(pass.id)
+    if frame > pass_lookup_result.used_frame + 1 {
+      sokol.sg_destroy_pass(pass)
+      ordered_remove(&ctx.doomed_passes, i)
+      i -= 1
+      c -= 1
+    }
+  }
+
+  // images
+  i = 0
+  c = len(ctx.doomed_images)
+  for ; i < c; i += 1 {
+    image := ctx.doomed_images[i]
+    image_lookup_result := sokol.sg_lookup_image(image.id)
+    if frame > image_lookup_result.used_frame + 1 {
+      sokol.sg_destroy_image(image)
+      ordered_remove(&ctx.doomed_images, i)
+      i -= 1
+      c -= 1
+    }
+  }
+}
+
+queue_destruction :: proc(queue: ^$T/[dynamic]$E, doomed_object: E) {
+  append(queue, doomed_object)
+}
+
 shutdown :: proc() {
+  destroy_textures()
+
+  collect_garbage(private.core_api.frame_index() + 100)
+
   destroy_buffers(ctx.cmd_buffers_feed)
 
   delete(ctx.cmd_buffers_feed)
   delete(ctx.cmd_buffers_render)
   delete(ctx.stages)
 }
-
 
 @(init, private)
 init_gfx_api :: proc() {
@@ -919,6 +1086,9 @@ init_gfx_api :: proc() {
     make_pipeline = make_pipeline,
     destroy_buffer = destroy_buffer,
     destroy_shader = destroy_shader,
+    destroy_pipeline = destroy_pipeline,
+    destroy_pass = destroy_pass,
+    destroy_image = destroy_image,
     make_shader_with_data = make_shader_with_data,
     register_stage = register_stage,
     bind_shader_to_pipeline = bind_shader_to_pipeline,

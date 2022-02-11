@@ -135,18 +135,21 @@ register_modify_cb :: proc "c" (modify_cb: proc "c" (path: cstring)) {
   append(&ctx.modify_cbs, modify_cb)
 }
 
-mount :: proc "c" (path: string, alias: string, watch: bool) -> error.Error {
+mount :: proc "c" (path: cstring, alias: cstring, watch: bool) -> error.Error {
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
-  if os.is_dir(path) {
+  path_str := string(path)
+  alias_str := string(alias)
+
+  if os.is_dir(path_str) {
     mp : Mount_Point = {
-      path = filepath.clean(path, context.temp_allocator),
-      alias = slashpath.clean(alias, context.temp_allocator),
+      path = filepath.clean(path_str, context.temp_allocator),
+      alias = slashpath.clean(alias_str, context.temp_allocator),
     }
 
     if watch {
-      mp.watch_id = dmon.watch(strings.clone_to_cstring(mp.path), dmon_event_cb, 0x1, nil).id
+      mp.watch_id = dmon.watch(strings.clone_to_cstring(mp.path, context.temp_allocator), dmon_event_cb, 0x1, nil).id
     }
 
     for mnt in ctx.mounts {

@@ -25,7 +25,7 @@ import "core:strings"
 import "core:sys/win32"
 
 Command_Line_Item :: struct {
-	name: cstring,
+	name: [64]u8,
 	allocated_value: bool,
 	using vp: struct #raw_union {
 		value: [8]u8,
@@ -64,10 +64,88 @@ message_box :: proc(msg: string) {
   win32.message_box_a(nil, strings.clone_to_cstring(msg, context.temp_allocator), "frag", win32.MB_OK|win32.MB_ICONERROR)
 }
 
-parse_command_line :: proc () {
-	for arg in ctx.cmd_line_args {
-		
+show_help :: proc(ctx: ^getopt.Context) {
+	buff : [4096]u8
+	cmdline.create_help_string(ctx, transmute(cstring)raw_data(&buff), uint(size_of(buff)))
+	fmt.println(transmute(cstring)raw_data(&buff))
+}
+
+parse_command_line :: proc (argc: int, argv: []cstring) -> ^getopt.Context {
+	append(&ctx.cmd_line_args, getopt.OPTIONS_END)
+	cmdline_ctx := cmdline.create_context(i32(argc), &argv[0], raw_data(ctx.cmd_line_args))
+
+	index : i32
+	arg : cstring
+	opt := cmdline.next(cmdline_ctx, &index, &arg)
+	for opt != -1 {
+		cur_arg := string(argv[index])
+		for i in 0 ..< len(ctx.cmd_line_args) - 1 {
+			cur_stored_arg_name := string(ctx.cmd_line_args[i].name)
+			
+			if cur_arg[0] == '-' && cur_arg[1] == '-' {
+				eq_idx := strings.index_rune(cur_arg, '=')
+				if eq_idx >= 0 {
+					_arg := cur_arg[2:eq_idx]
+					if cur_stored_arg_name != _arg {
+						continue
+					}
+				} else if cur_stored_arg_name[0] != cur_arg[2] {
+					continue 
+				}
+			} else if cur_arg[0] == '-' {
+				if ctx.cmd_line_args[i].short_name != i32(cur_arg[2]) {
+					continue
+				}
+			} else {
+				continue
+			}
+
+			item : Command_Line_Item
+			mem.copy(&item.name[0], raw_data(cur_stored_arg_name), len(item.name))
+
+			if arg != nil {
+				arg_len := len(arg)
+				if arg_len < size_of(item.value) - 1 {
+					item.allocated_value = false
+					mem.copy(&item.value[0], transmute(rawptr)arg, size_of(item.value))
+				} else {
+					item.allocated_value = true
+					item.value_ptr = transmute(^u8)mem.alloc(arg_len + 1)
+					mem.copy(item.value_ptr, transmute(rawptr)arg, arg_len + 1)
+				}
+			} else {
+				item.allocated_value = false
+				fmt.bprintf(item.value[:], "%d", opt)
+			}
+
+			append(&ctx.cmd_line_items, item)
+		}
+		opt = cmdline.next(cmdline_ctx, &index, &arg)
 	}
+
+	return cmdline_ctx
+}
+
+command_line_arg_value :: proc "c" (name: cstring) -> cstring {
+	for item in &ctx.cmd_line_items {
+		if transmute(cstring)&item.name[0] == name {
+			return item.allocated_value ? transmute(cstring)item.value_ptr : transmute(cstring)&item.value[0]
+		}
+	}
+	return nil
+}
+
+command_line_arg_exists :: proc "c" (name: cstring) -> bool {
+	context = runtime.default_context()
+	context.logger = ctx.logger^
+	context.allocator = ctx.alloc
+
+	for item in &ctx.cmd_line_items {
+		if transmute(cstring)raw_array_data(&item.name) == name {
+			return true
+		}
+	}
+	return false
 }
 
 register_command_line_arg :: proc "c" (name: cstring, short_name: u8, opt_type: getopt.Option_Type, desc: cstring, value_desc: cstring) {
@@ -238,17 +316,16 @@ main :: proc() {
 
 	sokol.stm_setup()
 
+	should_show_help : i32
 	opts := []getopt.Option {
 		{"run", 'r', .Required, nil, 'r', "game or application module to run", "filepath"},
+		{"help", 'h', .Flag_Set, &should_show_help, 1, "print this help message", nil},
 		getopt.OPTIONS_END,
 	}
 
-	args := slice.mapper(
-		os.args, 
-		proc(s: string) -> cstring { return strings.clone_to_cstring(s, context.temp_allocator) })
+	cstr_args := slice.mapper(os.args, proc(s: string) -> cstring { return strings.clone_to_cstring(s, context.temp_allocator) })
 
-	// args_copy := cstring(raw_data(args))
-	cmdline_ctx := cmdline.create_context(i32(len(args)), &args[0], &opts[0])
+	cmdline_ctx := cmdline.create_context(i32(len(cstr_args)), &cstr_args[0], &opts[0])
 
 	arg : cstring
 	app_filepath : string
@@ -276,40 +353,25 @@ main :: proc() {
 		opt = cmdline.next(cmdline_ctx, nil, &arg)
 	}
 
-	// app_filepath : string
-	// switch command := Command(args[1]); command {
-	// 	case run:
-	// 		if len(args) < 3 {
-	// 			usage(args[0])
-	// 			os.exit(1)
-	// 		}
-
-	// 		app_filepath = args[2]
-	// 	case:
-	// 		usage(args[0])
-	// 		os.exit(1)
-	// }
-
 	if len(app_filepath) == 0 {
-		message_box("Must provide path to frag plugin defining application entry point, as argument to 'run' command!")
-		usage(string(args[0]))
+		message_box("must provide path to frag plugin defining application entry point, as argument to 'run' command")
 		os.exit(1)
 	}
 
 	if !os.is_file(app_filepath) {
-		message_box(fmt.tprintf("Plugin at path: %s - does not exist!", app_filepath))
+		message_box(fmt.tprintf("plugin at path: %s - does not exist", app_filepath))
 		os.exit(1)
 	}
 
 	lib, lib_ok := dynlib.load_library(app_filepath)
 	if !lib_ok {
-		message_box(fmt.tprintf("Plugin at path: %s - is not a valid shared library! Error: %s", app_filepath, platform.dlerr()))
+		message_box(fmt.tprintf("plugin at path: %s - is not a valid shared library - %s", app_filepath, platform.dlerr()))
 		os.exit(1)
 	}
 
 	ptr, sym_ok := dynlib.symbol_address(lib, "frag_app")
 	if !sym_ok {
-		message_box(fmt.tprintf("Plugin at path: %s - does not export a symbol named 'frag_app'!", app_filepath, platform.dlerr()))
+		message_box(fmt.tprintf("plugin at path: %s - does not export a symbol named 'frag_app'", app_filepath, platform.dlerr()))
 		os.exit(1)
 	}
 
@@ -318,6 +380,17 @@ main :: proc() {
 	conf := api.Config{}
 	
 	fn(&conf, register_command_line_arg)
+
+	app_cmdline_ctx := parse_command_line(len(cstr_args), cstr_args)
+	if should_show_help != 0 {
+		fmt.println("frag arguments:")
+		show_help(cmdline_ctx)
+
+		if app_cmdline_ctx != nil && len(ctx.cmd_line_args) > 1 {
+			fmt.println("app arguments:")
+			show_help(app_cmdline_ctx)
+		}
+	}
 	
 	mem.copy(&default_name[0], transmute(rawptr)conf.app_name, len(conf.app_name))
 	conf.app_name = transmute(cstring)raw_data(&default_name)
@@ -361,6 +434,8 @@ init_app_api :: proc() {
 		height = sokol.sapp_height,
 		window_size = window_size,
 		dpi_scale = sokol.sapp_dpi_scale,
+		command_line_arg_exists = command_line_arg_exists,
+		command_line_arg_value = command_line_arg_value,
 		config = config,
     name = name,
 		logger = logger,
