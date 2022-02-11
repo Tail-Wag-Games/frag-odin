@@ -357,6 +357,35 @@ end_cb_pass :: proc "c" () {
   cb.cmd_idx += 1
 }
 
+begin_cb_pass :: proc "c" (pass: sokol.sg_pass, pass_action: ^sokol.sg_pass_action) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
+
+  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
+  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
+
+  offset := 0
+  buff := make_cb_params_buff(cb, size_of(sokol.sg_pass_action) + size_of(i32) * 2, &offset)
+
+  ref := Gfx_Command_Buffer_Ref {
+    key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
+    cmd_buffer_idx = cb.index,
+    cmd = .Begin_Pass,
+    params_offset = len(cb.params_buff),
+  }
+  append(&cb.refs, ref)
+
+  cb.cmd_idx += 1
+
+  mem.copy(buff, pass_action, size_of(pass_action^))
+  buff = mem.ptr_offset(buff, size_of(pass_action^))
+  (cast(^sokol.sg_pass)buff)^ = pass
+
+  sokol.sg_pass_set_used_frame(pass.id, private.core_api.frame_index())
+}
+
 begin_cb_default_pass :: proc "c" (pass_action: ^sokol.sg_pass_action, width: i32, height: i32) {
   context = runtime.default_context()
   context.allocator = gfx_alloc
@@ -1079,11 +1108,13 @@ init_gfx_api :: proc() {
       begin = begin_cb_stage,
       end = end_cb_stage,
       begin_default_pass = begin_cb_default_pass,
+      begin_pass = begin_cb_pass,
       end_pass = end_cb_pass,
     },
     make_buffer = make_buffer,
-    make_image = sokol.sg_make_image,
+    make_pass = sokol.sg_make_pass,
     make_pipeline = make_pipeline,
+    make_image = sokol.sg_make_image,
     destroy_buffer = destroy_buffer,
     destroy_shader = destroy_shader,
     destroy_pipeline = destroy_pipeline,

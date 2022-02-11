@@ -396,6 +396,7 @@ Gfx_Api :: struct {
 	staged: Gfx_Draw_Api,
 
 	make_buffer: proc "c" (desc: ^sokol.sg_buffer_desc) -> sokol.sg_buffer,
+	make_pass : proc "c" (desc: ^sokol.sg_pass_desc) -> sokol.sg_pass,
 	make_pipeline: proc "c" (desc: ^sokol.sg_pipeline_desc) -> sokol.sg_pipeline,
 	make_image : proc "c" (desc: ^sokol.sg_image_desc) -> sokol.sg_image,
 	destroy_buffer: proc "c" (buf: sokol.sg_buffer),

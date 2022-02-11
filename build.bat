@@ -35,6 +35,13 @@ if exist ".\thirdparty\dmon\dmon.lib" if exist ".\thirdparty\dmon\dmond.lib" got
 call .\thirdparty\sokol\build.bat
 if NOT %ERRORLEVEL% == 0 goto :EOF
 :DMON_CONTINUE
+if exist ".\src\frag\gfx\shaders\offscreen.odin" if exist ".\src\frag\gfx\shaders\draw.odin" goto :GFX_SHADERS_CONTINUE
+:GFX_SHADERS_BUILD
+call thirdparty\glslcc\.build\src\Debug\glslcc.exe -r -l hlsl --cvar=offscreen -o ./src/frag/gfx/shaders/offscreen.odin --vert=./src/frag/gfx/offscreen.vert --frag=./src/frag/gfx/basic.frag
+if NOT %ERRORLEVEL% == 0 goto :EOF
+call thirdparty\glslcc\.build\src\Debug\glslcc.exe -r -l hlsl --cvar=draw -o ./src/frag/gfx/shaders/draw.odin --vert=./src/frag/gfx/draw.vert --frag=./src/frag/gfx/basic.frag
+if NOT %ERRORLEVEL% == 0 goto :EOF
+:GFX_SHADERS_CONTINUE
 call odin build src/frag/app/app.odin -debug -out:frag.exe -collection:frag=src/frag -collection:imgui=src/imgui -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
 if NOT %ERRORLEVEL% == 0 goto :EOF
 if exist ".\src\imgui\shaders\imgui.odin" goto :IMGUI_SHADERS_CONTINUE
