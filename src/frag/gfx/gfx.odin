@@ -121,13 +121,13 @@ gfx_alloc: mem.Allocator
 
 run_command_cbs := [17]Run_Command_Callback {
   run_cb_begin_default_pass,
+  run_cb_begin_pass,
   run_cb_begin_default_pass,
   run_cb_begin_default_pass,
-  run_cb_begin_default_pass,
-  run_cb_begin_default_pass,
-  run_cb_begin_default_pass,
-  run_cb_begin_default_pass,
-  run_cb_begin_default_pass,
+  run_cb_apply_pipeline,
+  run_cb_apply_bindings,
+  run_cb_apply_uniforms,
+  run_cb_draw,
   run_cb_begin_default_pass,
   run_cb_end_pass,
   run_cb_begin_default_pass,
@@ -135,7 +135,7 @@ run_command_cbs := [17]Run_Command_Callback {
   run_cb_begin_default_pass,
   run_cb_begin_default_pass,
   run_cb_begin_default_pass,
-  run_cb_begin_stage,
+  run_begin_cb_stage,
   run_cb_end_stage,
 }
 
@@ -232,17 +232,6 @@ run_cb_begin_default_pass :: proc(buff: []u8, offset: int) -> ([]u8, int) {
 
   sokol.sg_begin_default_pass(pass_action, width^, height^)
 
-  return buff, cur_offset
-}
-
-run_cb_begin_stage :: proc(buff: []u8, offset: int) -> ([]u8, int) {
-  cur_offset := offset
-
-  name := cast(cstring)&buff[cur_offset]
-  cur_offset += 32
-
-  mem.copy(&ctx.cur_stage_name[0], transmute(rawptr)name, size_of(ctx.cur_stage_name))
-  
   return buff, cur_offset
 }
 
@@ -357,7 +346,7 @@ end_cb_pass :: proc "c" () {
   cb.cmd_idx += 1
 }
 
-apply_cb_uniforms :: proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, range: ^sokol.sg_range) {
+cb_draw :: proc "c" (base_element: i32, num_elements: i32, num_instances: i32) {
   context = runtime.default_context()
   context.allocator = gfx_alloc
 
@@ -367,13 +356,171 @@ apply_cb_uniforms :: proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, rang
   assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
 
   offset := 0
-  buff := make_cb_params_buff(cb, size_of(sokol.sg_shader_stage) + size_of(i32) * 2 + int(range.size), &offset)
+  buff := make_cb_params_buff(cb, size_of(i32) * 3, &offset)
+
+  ref := Gfx_Command_Buffer_Ref {
+    key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
+    cmd_buffer_idx = cb.index,
+    cmd = .Draw,
+    params_offset = offset,
+  }
+  append(&cb.refs, ref)
+
+  cb.cmd_idx += 1
+
+  (cast(^i32)buff)^ = base_element
+  buff = mem.ptr_offset(buff, size_of(i32))
+  (cast(^i32)buff)^ = num_elements
+  buff = mem.ptr_offset(buff, size_of(i32))
+  (cast(^i32)buff)^ = num_instances
+}
+
+run_cb_draw :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  cur_offset := offset
+
+  base_element := (cast(^i32)&buff[cur_offset])^
+  cur_offset += size_of(i32)
+  num_elements := (cast(^i32)&buff[cur_offset])^
+  cur_offset += size_of(i32)
+  num_instances := (cast(^i32)&buff[cur_offset])^
+  cur_offset += size_of(i32)
+  sokol.sg_draw(base_element, num_elements, num_instances)
+  return buff, cur_offset
+}
+
+apply_cb_pipeline :: proc "c" (pipeline: sokol.sg_pipeline) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
+
+  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
+  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
+
+  offset := 0
+  buff := make_cb_params_buff(cb, size_of(sokol.sg_pipeline), &offset)
+
+  ref := Gfx_Command_Buffer_Ref {
+    key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
+    cmd_buffer_idx = cb.index,
+    cmd = .Apply_Pipeline,
+    params_offset = offset,
+  }
+  append(&cb.refs, ref)
+
+  cb.cmd_idx += 1
+
+  (cast(^sokol.sg_pipeline)buff)^ = pipeline
+
+  sokol.sg_pipeline_set_used_frame(pipeline.id, private.core_api.frame_index())
+}
+
+run_cb_apply_pipeline :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  cur_offset := offset
+
+  pipeline := (cast(^sokol.sg_pipeline)&buff[cur_offset])^
+  sokol.sg_apply_pipeline(pipeline)
+  cur_offset += size_of(sokol.sg_pipeline)
+  return buff, cur_offset
+}
+
+apply_cb_bindings :: proc "c" (bind: ^sokol.sg_bindings) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
+
+  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
+  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
+
+  offset := 0
+  buff := make_cb_params_buff(cb, size_of(sokol.sg_bindings), &offset)
+
+  ref := Gfx_Command_Buffer_Ref {
+    key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
+    cmd_buffer_idx = cb.index,
+    cmd = .Apply_Bindings,
+    params_offset = offset,
+  }
+  append(&cb.refs, ref)
+
+  cb.cmd_idx += 1
+
+  mem.copy(buff, bind, size_of(bind^))
+
+  frame_idx := private.core_api.frame_index()
+
+  for i in 0 ..< sokol.SG_MAX_SHADERSTAGE_BUFFERS {
+    if bind.vertex_buffers[i].id > 0 {
+      sokol.sg_buffer_set_used_frame(bind.vertex_buffers[i].id, frame_idx)
+    } else {
+      break
+    }
+  }
+
+  if bind.index_buffer.id > 0 {
+    sokol.sg_buffer_set_used_frame(bind.index_buffer.id, frame_idx)
+  }
+
+  for i in 0 ..< sokol.SG_MAX_SHADERSTAGE_IMAGES {
+    if bind.vs_images[i].id > 0 {
+      sokol.sg_image_set_used_frame(bind.vs_images[i].id, frame_idx)
+    } else {
+      break
+    }
+  }
+
+  // for i in 0 ..< sokol.SG_MAX_SHADERSTAGE_BUFFERS {
+  //   if bind.vs_buffers[i].id > 0 {
+  //     sokol.sg_buffer_set_used_frame(bind.vs_buffers[i].id, frame_idx)
+  //   } else {
+  //     break
+  //   }
+  // }
+
+  for i in 0 ..< sokol.SG_MAX_SHADERSTAGE_IMAGES {
+    if bind.fs_images[i].id > 0 {
+      sokol.sg_image_set_used_frame(bind.fs_images[i].id, frame_idx)
+    } else {
+      break
+    }
+  }
+
+  // for i in 0 ..< sokol.SG_MAX_SHADERSTAGE_BUFFERS {
+  //   if bind.fs_buffers[i].id > 0 {
+  //     sokol.sg_buffer_set_used_frame(bind.fs_buffers[i].id, frame_idx)
+  //   } else {
+  //     break
+  //   }
+  // }
+}
+
+run_cb_apply_bindings :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  cur_offset := offset
+
+  bindings := cast(^sokol.sg_bindings)&buff[cur_offset]
+  sokol.sg_apply_bindings(bindings)
+  cur_offset += size_of(sokol.sg_bindings)
+  return buff, cur_offset
+}
+
+apply_cb_uniforms :: proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, data: rawptr, num_bytes: i32) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
+
+  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
+  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
+
+  offset := 0
+  buff := make_cb_params_buff(cb, size_of(sokol.sg_shader_stage) + size_of(i32) + int(num_bytes), &offset)
 
   ref := Gfx_Command_Buffer_Ref {
     key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .Apply_Uniforms,
-    params_offset = len(cb.params_buff),
+    params_offset = offset,
   }
   append(&cb.refs, ref)
 
@@ -383,7 +530,25 @@ apply_cb_uniforms :: proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, rang
   buff = mem.ptr_offset(buff, size_of(sokol.sg_shader_stage))
   (cast(^i32)buff)^ = ub_index
   buff = mem.ptr_offset(buff, size_of(i32))
-  mem.copy(buff, range, size_of(range^))
+  (cast(^i32)buff)^ = i32(num_bytes)
+  buff = mem.ptr_offset(buff, size_of(i32))
+  mem.copy(buff, data, int(num_bytes))
+  buff = mem.ptr_offset(buff, int(num_bytes))
+}
+
+run_cb_apply_uniforms :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  cur_offset := offset
+
+  stage := (cast(^sokol.sg_shader_stage)&buff[cur_offset])^
+  cur_offset += size_of(sokol.sg_shader_stage)
+  ub_index := (cast(^i32)&buff[cur_offset])^
+  cur_offset += size_of(i32)
+  num_bytes := (cast(^i32)&buff[cur_offset])^
+  cur_offset += size_of(i32)
+  data := cast(rawptr)&buff[cur_offset]
+  sokol.sg_apply_uniforms(stage, ub_index, &{ data, uint(num_bytes) })
+  cur_offset += int(num_bytes)
+  return buff, cur_offset
 }
 
 begin_cb_pass :: proc "c" (pass: sokol.sg_pass, pass_action: ^sokol.sg_pass_action) {
@@ -402,7 +567,7 @@ begin_cb_pass :: proc "c" (pass: sokol.sg_pass, pass_action: ^sokol.sg_pass_acti
     key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .Begin_Pass,
-    params_offset = len(cb.params_buff),
+    params_offset = offset,
   }
   append(&cb.refs, ref)
 
@@ -413,6 +578,17 @@ begin_cb_pass :: proc "c" (pass: sokol.sg_pass, pass_action: ^sokol.sg_pass_acti
   (cast(^sokol.sg_pass)buff)^ = pass
 
   sokol.sg_pass_set_used_frame(pass.id, private.core_api.frame_index())
+}
+
+run_cb_begin_pass :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  cur_offset := offset
+
+  pass_action := cast(^sokol.sg_pass_action)&buff[cur_offset]
+  cur_offset += size_of(sokol.sg_pass_action)
+  pass := (cast(^sokol.sg_pass)&buff[cur_offset])^
+  cur_offset += size_of(sokol.sg_pass)
+  sokol.sg_begin_pass(pass, pass_action)
+  return buff, cur_offset
 }
 
 begin_cb_default_pass :: proc "c" (pass_action: ^sokol.sg_pass_action, width: i32, height: i32) {
@@ -442,30 +618,6 @@ begin_cb_default_pass :: proc "c" (pass_action: ^sokol.sg_pass_action, width: i3
   (cast(^i32)buff)^ = width
   buff = mem.ptr_offset(buff, size_of(i32))
   (cast(^i32)buff)^ = height
-}
-
-record_cb_begin_stage :: proc(name: cstring, name_size: int) {
-  assert(name_size == 32)
-
-  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
-
-  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
-  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
-
-  offset := 0
-  buff := make_cb_params_buff(cb, name_size, &offset)
-
-  ref := Gfx_Command_Buffer_Ref {
-    key = ((u32(cb.stage_order) << 16) | u32(cb.cmd_idx)),
-    cmd_buffer_idx = cb.index,
-    cmd = .Stage_Push,
-    params_offset = offset,
-  }
-  append(&cb.refs, ref)
-
-  cb.cmd_idx += 1
-
-  mem.copy(buff, transmute(rawptr)name, name_size)
 }
 
 record_cb_end_stage :: proc() {
@@ -508,6 +660,41 @@ begin_cb_stage :: proc "c" (stage_handle: api.Gfx_Stage_Handle) -> bool {
   record_cb_begin_stage(transmute(cstring)&stage.name[0], size_of(stage.name))
 
   return true
+}
+
+record_cb_begin_stage :: proc(name: cstring, name_size: int) {
+  assert(name_size == 32)
+
+  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
+
+  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
+  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
+
+  offset := 0
+  buff := make_cb_params_buff(cb, name_size, &offset)
+
+  ref := Gfx_Command_Buffer_Ref {
+    key = ((u32(cb.stage_order) << 16) | u32(cb.cmd_idx)),
+    cmd_buffer_idx = cb.index,
+    cmd = .Stage_Push,
+    params_offset = offset,
+  }
+  append(&cb.refs, ref)
+
+  cb.cmd_idx += 1
+
+  mem.copy(buff, transmute(rawptr)name, name_size)
+}
+
+run_begin_cb_stage :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  cur_offset := offset
+
+  name := cast(cstring)&buff[cur_offset]
+  cur_offset += 32
+
+  mem.copy(&ctx.cur_stage_name[0], transmute(rawptr)name, size_of(ctx.cur_stage_name))
+  
+  return buff, cur_offset
 }
 
 begin_imm_stage :: proc "c" (stage_handle: api.Gfx_Stage_Handle) -> bool {
@@ -960,6 +1147,13 @@ init :: proc(desc: ^sokol.sg_desc, allocator := context.allocator) {
     return mem.alloc(int(size))
   })
 
+  sokol.log_callback(proc "c" (msg: cstring) {
+    context = runtime.default_context()
+    context.allocator = gfx_alloc
+
+    fmt.println(msg)
+  })
+
   sokol.free_callback(proc "c" (ptr: rawptr) {
     context = runtime.default_context()
     context.allocator = gfx_alloc
@@ -1129,7 +1323,7 @@ init_gfx_api :: proc() {
       apply_scissor_rect = sokol.sg_apply_scissor_rect,
       apply_pipeline = sokol.sg_apply_pipeline,
       apply_bindings = sokol.sg_apply_bindings,
-      apply_uniforms = sokol.sg_apply_uniforms,
+      apply_uniforms = proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, data: rawptr, num_bytes: i32) { sokol.sg_apply_uniforms(stage, ub_index, &{ data, uint(num_bytes) }) },
       draw = sokol.sg_draw,
       end_pass = sokol.sg_end_pass,
     },
@@ -1141,6 +1335,7 @@ init_gfx_api :: proc() {
       apply_pipeline = apply_cb_pipeline,
       apply_bindings = apply_cb_bindings,
       apply_uniforms = apply_cb_uniforms,
+      draw = cb_draw,
       end_pass = end_cb_pass,
     },
     make_buffer = make_buffer,

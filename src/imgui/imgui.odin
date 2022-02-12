@@ -357,7 +357,7 @@ draw :: proc(data: ^cimgui.Draw_Data) {
   ctx.bind.fs_images[0] = gfx_api.texture_white()
   gfx_api.imm.apply_pipeline(ctx.pipeline)
   gfx_api.imm.apply_bindings(&ctx.bind)
-  gfx_api.imm.apply_uniforms(.SG_SHADERSTAGE_VS, 0, &sokol.sg_range { &uniforms, size_of(uniforms) })
+  gfx_api.imm.apply_uniforms(.SG_SHADERSTAGE_VS, 0, &uniforms, size_of(uniforms) )
 
   for dlist in 0 ..< data.cmd_lists_count {
     dl := mem.slice_ptr(data.cmd_lists, int(data.cmd_lists_count))[dlist]

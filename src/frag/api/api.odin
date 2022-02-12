@@ -260,9 +260,10 @@ Core_Api :: struct {
 	alloc: proc "c" () -> mem.Allocator,
 
 	delta_tick: proc "c" () -> u64,
+	delta_time: proc "c" () -> f32,
 	fps: proc "c" () -> f32,
+	frame_duration: proc "c" () -> f64,
 	frame_index: proc "c" () -> i64,
-
 	job_thread_index: proc "c" () -> i32,
 	num_job_threads: proc "c" () -> i32,
 }
@@ -383,7 +384,7 @@ Gfx_Draw_Api :: struct {
 	apply_scissor_rect: proc "c" (x: i32, y: i32, width: i32, height: i32, origin_top_left: bool),
 	apply_pipeline: proc "c" (pip: sokol.sg_pipeline),
 	apply_bindings: proc "c" (bind: ^sokol.sg_bindings),
-	apply_uniforms: proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, data: ^sokol.sg_range),
+	apply_uniforms: proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, data: rawptr, num_bytes: i32),
 	draw: proc "c" (base_element: i32, num_elements: i32, num_instances: i32),
 	end_pass: proc "c" (),
 	update_buffer: proc "c" (buf: sokol.sg_buffer, data : ^sokol.sg_range),

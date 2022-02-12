@@ -4,6 +4,7 @@
 *.dll
 *.lib
 *.exp
+*.rdbg
 
 .vscode
 .metals

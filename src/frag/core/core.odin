@@ -47,6 +47,10 @@ delta_tick :: proc "c" () -> u64 {
   return ctx.delta_tick
 }
 
+delta_time :: proc "c" () -> f32 {
+  return f32(sokol.stm_sec(ctx.delta_tick))
+}
+
 fps :: proc "c" () -> f32 {
   return ctx.fps_frame
 }
@@ -143,7 +147,9 @@ init_core_api :: proc() {
   private.core_api = {
     alloc = alloc,
     delta_tick = delta_tick,
+    delta_time = delta_time,
     fps = fps,
+    frame_duration = sokol.sapp_frame_duration,
     frame_index = frame_index,
     job_thread_index = job_thread_index,
     num_job_threads = num_job_threads,
