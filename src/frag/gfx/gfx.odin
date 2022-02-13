@@ -255,6 +255,7 @@ execute_command_buffer :: proc(cmds: []Gfx_Command_Buffer) -> int {
 
   if cmd_count > 0 {
     refs := make([]Gfx_Command_Buffer_Ref, cmd_count, context.temp_allocator)
+    defer delete(refs, context.temp_allocator)
 
     cur_ref_count := 0
     init_refs := refs
@@ -278,6 +279,11 @@ execute_command_buffer :: proc(cmds: []Gfx_Command_Buffer) -> int {
       cb := &cmds[ref.cmd_buffer_idx]
       run_command_cbs[ref.cmd](cb.params_buff[:], ref.params_offset)
     }
+  }
+
+  for i in 0 ..< cmd_buffer_count {
+    clear(&cmds[i].params_buff)
+    cmds[i].cmd_idx = 0
   }
 
   return cmd_count

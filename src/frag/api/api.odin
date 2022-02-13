@@ -4,10 +4,11 @@ import "thirdparty:getopt"
 import "thirdparty:sokol"
 
 import "linchpin:error"
+import "linchpin:math/geom"
 import "linchpin:memio"
 
 import "core:log"
-import "core:math/linalg"
+import glm "core:math/linalg"
 import "core:mem"
 import "core:runtime"
 
@@ -53,6 +54,7 @@ Api_Type :: enum i32 {
 	Gfx,
 	Vfs,
 	Asset,
+	Camera,
 }
 
 // Key codes line up with GLFW
@@ -206,7 +208,7 @@ Register_Command_Line_Arg_Cb :: proc "c" (name: cstring, short_name: u8, opt_typ
 App_Api :: struct {
 	width: proc "c" () -> i32,
 	height: proc "c" () -> i32,
-	window_size: proc "c" (size: ^linalg.Vector2f32),
+	window_size: proc "c" (size: ^glm.Vector2f32),
 	dpi_scale: proc "c" () -> f32,
 	command_line_arg_exists: proc "c" (name: cstring) -> bool,
 	command_line_arg_value: proc "c" (name: cstring) -> cstring,
@@ -266,6 +268,41 @@ Core_Api :: struct {
 	frame_index: proc "c" () -> i64,
 	job_thread_index: proc "c" () -> i32,
 	num_job_threads: proc "c" () -> i32,
+}
+
+Camera :: struct {
+	forward: glm.Vector3f32,
+	right: glm.Vector3f32,
+	up: glm.Vector3f32,
+	pos: glm.Vector3f32,
+
+	quat: glm.Quaternionf32,
+	ffar: f32,
+	fnear: f32,
+	fov: f32,
+	viewport: geom.Rectangle,
+}
+
+Fps_Camera :: struct {
+	cam: Camera,
+	pitch: f32,
+	yaw: f32,
+}
+
+Camera_View_Plane :: enum i32 {
+	Left,
+	Right,
+	Top,
+	Bottom,
+	Near,
+	Far,
+}
+
+Camera_Api :: struct {
+	init_camera: proc "c" (cam: ^Camera, fov_deg: f32, viewport: geom.Rectangle, fnear: f32, ffar: f32),
+	look_at: proc "c" (cam: ^Camera, pos: ^glm.Vector3f32, target: ^glm.Vector3f32, up: ^glm.Vector3f32),
+	init_fps_camera: proc "c" (cam: ^Fps_Camera, fov_deg: f32, viewport: geom.Rectangle, fnear: f32, ffar: f32),
+	fps_look_at: proc "c" (cam: ^Fps_Camera, pos: ^glm.Vector3f32, target: ^glm.Vector3f32, up: ^glm.Vector3f32),
 }
 
 Shader_Lang :: enum i32 {

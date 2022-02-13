@@ -4,6 +4,7 @@ import "thirdparty:sokol"
 
 import "frag:api"
 import "frag:asset"
+import "frag:camera"
 import "frag:gfx"
 import "frag:plugin"
 import "frag:private"
@@ -126,6 +127,8 @@ init :: proc(conf: ^api.Config, app_module: dynlib.Library, allocator := context
   gfx.init(&sokol.sg_desc{
     desc = sokol.sapp_sgcontext(),
   })
+
+  camera.init()
 
   plugin.init(strings.clone_from_cstring(conf.plugin_path), app_module) or_return
   

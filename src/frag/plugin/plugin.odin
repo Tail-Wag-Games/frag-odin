@@ -57,13 +57,14 @@ Plugin_Context :: struct {
 
 ctx : Plugin_Context
 
-native_apis := [6]rawptr {
+native_apis := [7]rawptr {
   &private.core_api, 
   &private.plugin_api, 
   &private.app_api, 
   &private.gfx_api, 
   &private.vfs_api, 
   &private.asset_api,
+  &private.camera_api,
 }
 
 inject_api :: proc "c" (name: cstring, api: rawptr) {
