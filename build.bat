@@ -53,6 +53,8 @@ call odin build src/imgui/imgui.odin -debug -build-mode:dll -out:imgui.dll -coll
 if NOT %ERRORLEVEL% == 0 goto :EOF
 call odin build src/ecs/ecs.odin -debug -build-mode:dll -out:ecs.dll -collection:frag=src/frag -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
 if NOT %ERRORLEVEL% == 0 goto :EOF
+call odin build src/input/input.odin -debug -build-mode:dll -out:input.dll -collection:frag=src/frag -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
+if NOT %ERRORLEVEL% == 0 goto :EOF
 :FRAG_RUN
 frag.exe --run=%1 --asset-dir=%2
 :EOF
