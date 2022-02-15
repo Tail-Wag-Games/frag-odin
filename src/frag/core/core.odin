@@ -60,6 +60,10 @@ frame_index :: proc "c" () -> i64 {
   return ctx.frame_idx
 }
 
+frame_time :: proc "c" () -> f64 {
+  return sokol.stm_ms(ctx.delta_tick)
+}
+
 job_thread_index :: proc "c" () -> i32 {
   context = runtime.default_context()
   context.allocator = ctx.alloc
@@ -153,6 +157,7 @@ init_core_api :: proc() {
     delta_time = delta_time,
     fps = fps,
     frame_duration = sokol.sapp_frame_duration,
+    frame_time = frame_time,
     frame_index = frame_index,
     job_thread_index = job_thread_index,
     num_job_threads = num_job_threads,

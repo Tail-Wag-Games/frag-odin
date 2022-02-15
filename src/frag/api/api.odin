@@ -273,6 +273,7 @@ Core_Api :: struct {
 	delta_time: proc "c" () -> f32,
 	fps: proc "c" () -> f32,
 	frame_duration: proc "c" () -> f64,
+	frame_time: proc "c" () -> f64,
 	frame_index: proc "c" () -> i64,
 	job_thread_index: proc "c" () -> i32,
 	num_job_threads: proc "c" () -> i32,
