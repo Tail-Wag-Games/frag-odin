@@ -22,19 +22,20 @@ ecs_api := types.Ecs_Api {
   
 }
 
-@(link_name="cr_main")
 @export frag_plugin_main :: proc "c" (plugin: ^api.Plugin, e: api.Plugin_Event) -> i32 {
   context = runtime.default_context()
   context.allocator = core_api != nil ? core_api.alloc() : context.allocator
   context.logger = app_api != nil ? app_api.logger()^ : context.logger
 
   switch e {
-    case api.Plugin_Event.Load: {
+    case api.Plugin_Event.Init: {
       plugin_api = plugin.api
       core_api = cast(^api.Core_Api)plugin.api.get_api(api.Api_Type.Core)
       gfx_api = cast(^api.Gfx_Api)plugin.api.get_api(api.Api_Type.Gfx)
       app_api = cast(^api.App_Api)plugin.api.get_api(api.Api_Type.App)
+    }
 
+    case api.Plugin_Event.Load: {
       plugin_api.inject_api("ecs", &ecs_api)
     }
 

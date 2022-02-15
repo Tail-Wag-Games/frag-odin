@@ -12,6 +12,13 @@ import glm "core:math/linalg"
 import "core:mem"
 import "core:runtime"
 
+PLUGIN_UPDATE_INTERVAL :: f32(1.0)
+MAX_PLUGINS :: 64
+
+MAX_APP_TOUCHPOINTS :: 8
+MAX_APP_MOUSE_BUTTONS :: 3
+MAX_APP_KEY_CODES :: 512
+
 Config :: struct {
   app_name: cstring,
   app_title: cstring,
@@ -213,6 +220,7 @@ App_Api :: struct {
 	command_line_arg_exists: proc "c" (name: cstring) -> bool,
 	command_line_arg_value: proc "c" (name: cstring) -> cstring,
 	config: proc "c" () -> ^Config,
+	key_pressed: proc "c" (key: Key_Code) -> bool,
 	name: proc "c" () -> cstring,
 	logger: proc "c" () -> ^log.Logger,
 }
@@ -300,9 +308,15 @@ Camera_View_Plane :: enum i32 {
 
 Camera_Api :: struct {
 	init_camera: proc "c" (cam: ^Camera, fov_deg: f32, viewport: geom.Rectangle, fnear: f32, ffar: f32),
-	look_at: proc "c" (cam: ^Camera, pos: ^glm.Vector3f32, target: ^glm.Vector3f32, up: ^glm.Vector3f32),
-	init_fps_camera: proc "c" (cam: ^Fps_Camera, fov_deg: f32, viewport: geom.Rectangle, fnear: f32, ffar: f32),
-	fps_look_at: proc "c" (cam: ^Fps_Camera, pos: ^glm.Vector3f32, target: ^glm.Vector3f32, up: ^glm.Vector3f32),
+	look_at: proc "c" (cam: ^Camera, pos: glm.Vector3f32, target: glm.Vector3f32, up: glm.Vector3f32),
+	perspective_mat : proc "c" (cam: Camera) -> glm.Matrix4x4f32,
+	view_mat : proc "c" (cam: Camera) -> glm.Matrix4x4f32,
+	init_fps_camera: proc "c" (fps: ^Fps_Camera, fov_deg: f32, viewport: geom.Rectangle, fnear: f32, ffar: f32),
+	fps_look_at: proc "c" (fps: ^Fps_Camera, pos: glm.Vector3f32, target: glm.Vector3f32, up: glm.Vector3f32),
+	fps_pitch: proc "c" (fps: ^Fps_Camera, pitch: f32),
+	fps_yaw: proc "c" (fps: ^Fps_Camera, yaw: f32),
+	fps_forward: proc "c" (fps: ^Fps_Camera, forward: f32),
+	fps_strafe: proc "c" (fps: ^Fps_Camera, strafe: f32),
 }
 
 Shader_Lang :: enum i32 {
@@ -456,6 +470,7 @@ Plugin_Event :: enum i32 {
 	Step,
 	Unload,
 	Close,
+	Init,
 }
 
 Plugin_Crash :: enum i32 {
@@ -502,13 +517,6 @@ Vfs_Api :: struct {
 	mount: proc "c" (path: cstring, alias: cstring, watch: bool) -> error.Error,
 	register_modify_cb: proc "c" (modify_cb: proc "c" (path: cstring)),
 }
-
-PLUGIN_UPDATE_INTERVAL :: f32(1.0)
-MAX_PLUGINS :: 64
-
-MAX_APP_TOUCHPOINTS :: 8
-MAX_APP_MOUSE_BUTTONS :: 3
-MAX_APP_KEY_CODES :: 512
 
 to_id :: proc(idx: int) -> u32 {
 	return u32(idx) + 1

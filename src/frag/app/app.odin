@@ -39,6 +39,7 @@ App_Context :: struct {
 	logger: ^log.Logger,
 	app_filepath: string,
 	window_size: linalg.Vector2f32,
+	keys_pressed: [api.MAX_APP_KEY_CODES]bool,
 	cmd_line_args: [dynamic]getopt.Option,
 	cmd_line_items: [dynamic]Command_Line_Item,
 	app_module: dynlib.Library,
@@ -228,17 +229,19 @@ cleanup_callback :: proc "c" () {
 	log.debug("core subsystem shut down")
 }
 
-event_callback :: proc "c" (event: ^sokol.sapp_event) {
-	if event.type == .SAPP_EVENTTYPE_KEY_DOWN && !event.key_repeat {
-		#partial switch event.key_code {
-		case .SAPP_KEYCODE_ESCAPE:
-			sokol.sapp_request_quit()
-		case .SAPP_KEYCODE_Q:
-			if u32(sokol.sapp_modifier.SAPP_MODIFIER_CTRL) == event.modifiers {
-				sokol.sapp_request_quit()
-			}
-		}
+event_callback :: proc "c" (e: ^sokol.sapp_event) {
+	context = runtime.default_context()
+	context.logger = ctx.logger^
+	context.allocator = ctx.alloc
+
+	#partial switch e.type {
+		case .SAPP_EVENTTYPE_KEY_DOWN:
+			ctx.keys_pressed[e.key_code] = true
+		case .SAPP_EVENTTYPE_KEY_UP:
+			ctx.keys_pressed[e.key_code] = false
 	}
+
+	plugin.broadcast_event(cast(^api.App_Event)e)
 }
 
 window_size :: proc "c" (size: ^linalg.Vector2f32) {
@@ -248,6 +251,10 @@ window_size :: proc "c" (size: ^linalg.Vector2f32) {
 	
 	assert(size != nil)
 	size^ = ctx.window_size
+}
+
+key_pressed :: proc "c" (key: api.Key_Code) -> bool {
+	return ctx.keys_pressed[key]
 }
 
 config :: proc "c" () -> ^api.Config {
@@ -433,6 +440,7 @@ init_app_api :: proc() {
 		width = sokol.sapp_width,
 		height = sokol.sapp_height,
 		window_size = window_size,
+		key_pressed = key_pressed,
 		dpi_scale = sokol.sapp_dpi_scale,
 		command_line_arg_exists = command_line_arg_exists,
 		command_line_arg_value = command_line_arg_value,

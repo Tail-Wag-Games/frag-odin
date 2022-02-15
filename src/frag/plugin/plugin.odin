@@ -33,7 +33,7 @@ Plugin_Object :: struct {
 
 Plugin_Item :: struct {
   using po : struct #raw_union {
-    p: cr.CR_Plugin,
+    p: cr.Cr_Plugin,
     obj: Plugin_Object,
   },
 
@@ -42,7 +42,6 @@ Plugin_Item :: struct {
   filepath: string,
   update_tm: f32,
   deps: []string,
-  initialized: bool,
 }
 
 Plugin_Context :: struct {
@@ -258,7 +257,6 @@ load_abs :: proc(filepath: string, entry: bool, deps: []string) -> error.Error {
   item.filepath = filepath
   item.deps = entry ? deps : item.info.deps
   item.order = -1
-  item.update_tm = max(f32)
   dynlib.unload_library(dll)
 
   append(&ctx.plugins, item)
@@ -273,6 +271,12 @@ load :: proc "c" (name: cstring) -> (err: error.Error = nil) {
 
   assert(!ctx.loaded, "additional plugins cannot be loaded after `init_plugins` has been invoked")
   return load_abs(strings.concatenate({filepath.join(elems={ctx.plugin_path, strings.clone_from_cstring(name, context.temp_allocator)}, allocator=context.temp_allocator), platform.DLL_EXT}, context.temp_allocator), false, []string {})
+}
+
+broadcast_event :: proc(e: ^api.App_Event) {
+  for idx in ctx.plugin_update_order {
+    cr.plugin_event(&ctx.plugins[idx].p, e)
+  }
 }
 
 

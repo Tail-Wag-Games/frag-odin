@@ -250,14 +250,13 @@ shutdown :: proc() {
   delete(ctx.indices)
 }
 
-@(link_name="cr_main")
 @export frag_plugin_main :: proc "c" (plugin: ^api.Plugin, e: api.Plugin_Event) -> i32 {
   context = runtime.default_context()
   context.allocator = core_api != nil ? core_api.alloc() : context.allocator
   context.logger = app_api != nil ? app_api.logger()^ : context.logger
 
   switch e {
-    case api.Plugin_Event.Load: {
+    case api.Plugin_Event.Init: {
       plugin_api = plugin.api
       core_api = cast(^api.Core_Api)plugin.api.get_api(api.Api_Type.Core)
       gfx_api = cast(^api.Gfx_Api)plugin.api.get_api(api.Api_Type.Gfx)
@@ -269,8 +268,9 @@ shutdown :: proc() {
       }
 
       plugin_api.inject_api("imgui", &imgui_api)
-
-      // sokol.sg_imgui_init(&sg_imgui)
+    }
+    case api.Plugin_Event.Load: {
+      
     }
 
     case api.Plugin_Event.Step: {
