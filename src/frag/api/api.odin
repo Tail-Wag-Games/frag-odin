@@ -205,8 +205,80 @@ App_Flag :: enum i32 {
 
 App_Flags :: bit_set[App_Flag]
 
+App_Event_Type :: enum u32 {
+	Invalid,
+	Key_Down,
+	Key_Up,
+	Char,
+	Mouse_Down,
+	Mouse_Up,
+	Mouse_Scroll,
+	Mouse_Move,
+	Mouse_Enter,
+	Mouse_Leave,
+	Touch_Began,
+	Touch_Moved,
+	Touch_Ended,
+	Touch_Cancelled,
+	Resized,
+	Iconified,
+	Restored,
+	Focused,
+	Unfocused,
+	Suspended,
+	Resumed,
+	Update_Cursor,
+	Quit_Requested,
+	Clipboard_Pasted,
+	Files_Dropped,
+	Num,
+	Update_Apis,
+}
+
+Modifier_Key :: enum i32 {
+	Shift = (1 << 0),
+	Ctrl = (1 << 1),
+	Alt = (1 << 2),
+	Super = (1 << 3),
+}
+
+Modifier_Keys :: bit_set[Modifier_Key]
+
+Mouse_Button :: enum i32 {
+	Invalid = -1,
+	Left = 0,
+	Right = 1,
+	Middle = 2,
+}
+
+Touch_Point :: struct {
+	identifier : uintptr,
+	pos_x: f32,
+	pos_y: f32,
+	changed: bool,
+}
+
 App_Event :: struct {
 	frame_count: u64,
+	event_type: App_Event_Type,
+	key_code: Key_Code,
+	char_code: u32,
+	key_repeat: bool,
+	modifiers: u32,
+	mouse_button: Mouse_Button,
+	mouse_x: f32,
+	mouse_y: f32,
+	mouse_dx: f32,
+	mouse_dy: f32,
+	scroll_x: f32,
+	scroll_y: f32,
+	num_touches: i32,
+	touches: [MAX_APP_TOUCHPOINTS]Touch_Point,
+	window_width: i32,
+	window_height: i32,
+	framebuffer_width: i32,
+	framebuffer_Height: i32,
+	native_event: rawptr,
 }
 
 App_Event_Callback :: proc "c" (e: ^App_Event)
@@ -221,6 +293,8 @@ App_Api :: struct {
 	command_line_arg_value: proc "c" (name: cstring) -> cstring,
 	config: proc "c" () -> ^Config,
 	key_pressed: proc "c" (key: Key_Code) -> bool,
+	mouse_capture: proc "c" (),
+	mouse_release: proc "c" (),
 	name: proc "c" () -> cstring,
 	logger: proc "c" () -> ^log.Logger,
 }

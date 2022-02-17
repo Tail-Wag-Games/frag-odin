@@ -6,6 +6,17 @@ import "./types"
 
 import "core:runtime"
 
+MAX_DEVICES :: 32
+
+Device_Type :: enum {
+  Mouse,
+  Keyboard,
+}
+
+Input_Context :: struct {
+  
+}
+
 @(link_section=".state")
 core_api : ^api.Core_Api
 
@@ -18,7 +29,19 @@ app_api : ^api.App_Api
 @(link_section=".state")
 gfx_api : ^api.Gfx_Api
 
+@(link_section=".state")
+ctx : Input_Context
+
 input_api := types.Input_Api {
+  
+}
+
+// create_device :: proc "c" (device_type: Device_Type) -> Input_Device_Handle {
+
+// }
+
+
+@export frag_plugin_event :: proc "c" (plugin: ^api.Plugin, e: ^api.App_Event) {
   
 }
 

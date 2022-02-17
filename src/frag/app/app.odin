@@ -257,6 +257,14 @@ key_pressed :: proc "c" (key: api.Key_Code) -> bool {
 	return ctx.keys_pressed[key]
 }
 
+mouse_capture :: proc "c" () {
+	win32.set_capture(sokol.sapp_get_win32_hwnd())
+}
+
+mouse_release :: proc "c" () {
+	win32.release_capture()
+}
+
 config :: proc "c" () -> ^api.Config {
 	return &ctx.conf
 }
@@ -441,6 +449,8 @@ init_app_api :: proc() {
 		height = sokol.sapp_height,
 		window_size = window_size,
 		key_pressed = key_pressed,
+		mouse_capture = mouse_capture,
+		mouse_release = mouse_release,
 		dpi_scale = sokol.sapp_dpi_scale,
 		command_line_arg_exists = command_line_arg_exists,
 		command_line_arg_value = command_line_arg_value,

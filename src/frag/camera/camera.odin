@@ -5,6 +5,7 @@ import "linchpin:math/geom"
 import "frag:api"
 import "frag:private"
 
+import "core:fmt"
 import glm "core:math/linalg"
 import "core:mem"
 import "core:runtime"
@@ -19,13 +20,13 @@ init_camera :: proc "c" (cam: ^api.Camera, fov_deg: f32, viewport: geom.Rectangl
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
+  cam.pos = {0.0, 0.0, 0.0}
+  cam.forward = {0.0, 0.0, -1.0}
   cam.right = glm.VECTOR3F32_X_AXIS
-  cam.up = glm.VECTOR3F32_Z_AXIS
-  cam.forward = glm.VECTOR3F32_Y_AXIS
-  cam.pos = glm.Vector3f32{0, 0, 0}
+  cam.up = glm.VECTOR3F32_Y_AXIS  
 
   cam.quat = glm.QUATERNIONF32_IDENTITY
-  cam.fov = glm.radians(fov_deg)
+  cam.fov = fov_deg
   cam.fnear = fnear
   cam.ffar = ffar
   cam.viewport = viewport
@@ -63,7 +64,7 @@ perspective_mat :: proc "c" (cam: api.Camera) -> glm.Matrix4x4f32 {
 
   w := cam.viewport.xmax - cam.viewport.xmin
   h := cam.viewport.ymax - cam.viewport.ymin
-  return glm.matrix4_perspective_f32(cam.fov, w / h, cam.fnear, cam.ffar)
+  return glm.matrix4_perspective_f32(glm.radians(cam.fov), w / h, cam.fnear, cam.ffar)
 }
 
 view_mat :: proc "c" (cam: api.Camera) -> glm.Matrix4x4f32 {
@@ -78,9 +79,10 @@ update_rotation :: proc "c" (cam: ^api.Camera) {
   context.allocator = ctx.alloc
 
   m := glm.matrix4_from_quaternion_f32(cam.quat)
+
   cam.right = m[0].xyz
-  cam.up = (m[1].xyz * -1.0)
-  cam.forward = m[2].xyz
+  cam.up = m[1].xyz
+  cam.forward = -1.0 * m[2].xyz
 }
 
 init_fps_camera :: proc "c" (cam: ^api.Fps_Camera, fov_deg: f32, viewport: geom.Rectangle, fnear: f32, ffar: f32) {
@@ -98,7 +100,7 @@ fps_look_at :: proc "c" (fps: ^api.Fps_Camera, pos: glm.Vector3f32, target: glm.
 
   look_at(&fps.cam, pos, target, up)
 
-  x, _, z := glm.euler_angles_from_quaternion_f32(fps.cam.quat, .XYZ)
+  x, y, z := glm.euler_angles_from_quaternion_f32(fps.cam.quat, .XYZ)
   fps.pitch = x
   fps.yaw = z
 }
@@ -117,9 +119,8 @@ fps_pitch :: proc "c" (fps: ^api.Fps_Camera, pitch: f32) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
   
-  fps.pitch -= pitch
-  fps.cam.quat = glm.quaternion_angle_axis_f32(glm.radians(fps.yaw), glm.VECTOR3F32_Z_AXIS) * 
-                  glm.quaternion_angle_axis_f32(glm.radians(fps.pitch), glm.VECTOR3F32_X_AXIS)
+  fps.pitch += pitch
+  fps.cam.quat = glm.quaternion_angle_axis_f32(fps.yaw, {0, 1, 0}) * glm.quaternion_angle_axis_f32(fps.pitch, {1, 0, 0})
   update_rotation(&fps.cam)
 }
 
@@ -127,9 +128,8 @@ fps_yaw :: proc "c" (fps: ^api.Fps_Camera, yaw: f32) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
   
-  fps.yaw -= yaw
-  fps.cam.quat = glm.quaternion_angle_axis_f32(glm.radians(fps.yaw), glm.VECTOR3F32_Z_AXIS) * 
-                  glm.quaternion_angle_axis_f32(glm.radians(fps.pitch), glm.VECTOR3F32_X_AXIS)
+  fps.yaw += yaw
+  fps.cam.quat = glm.quaternion_angle_axis_f32(fps.yaw, {0, 1, 0}) * glm.quaternion_angle_axis_f32(fps.pitch, {1, 0, 0})
   update_rotation(&fps.cam)
 }
 
