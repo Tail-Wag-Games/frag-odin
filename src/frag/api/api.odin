@@ -386,6 +386,7 @@ Camera_Api :: struct {
 	look_at: proc "c" (cam: ^Camera, pos: glm.Vector3f32, target: glm.Vector3f32, up: glm.Vector3f32),
 	perspective_mat : proc "c" (cam: Camera) -> glm.Matrix4x4f32,
 	view_mat : proc "c" (cam: Camera) -> glm.Matrix4x4f32,
+	calc_frustum_points_using_range : proc "c" (cam: ^Camera, fnear: f32, ffar: f32) -> [8]glm.Vector3f32,
 	init_fps_camera: proc "c" (fps: ^Fps_Camera, fov_deg: f32, viewport: geom.Rectangle, fnear: f32, ffar: f32),
 	fps_look_at: proc "c" (fps: ^Fps_Camera, pos: glm.Vector3f32, target: glm.Vector3f32, up: glm.Vector3f32),
 	fps_pitch: proc "c" (fps: ^Fps_Camera, pitch: f32),
@@ -496,12 +497,12 @@ Shader :: struct {
 	info: Shader_Info,
 }
 
-Gfx_Stage_Handle :: struct {
+Stage_Handle :: struct {
 	id: u32,
 }
 
-Gfx_Draw_Api :: struct {
-	begin: proc "c" (stage_handle: Gfx_Stage_Handle) -> bool,
+Draw_Api :: struct {
+	begin: proc "c" (stage_handle: Stage_Handle) -> bool,
 	end: proc "c" (),
 
 	begin_default_pass: proc "c" (pass_action: ^sokol.sg_pass_action, width: i32, height: i32),
@@ -514,13 +515,13 @@ Gfx_Draw_Api :: struct {
 	draw: proc "c" (base_element: i32, num_elements: i32, num_instances: i32),
 	end_pass: proc "c" (),
 	update_buffer: proc "c" (buf: sokol.sg_buffer, data : ^sokol.sg_range),
-	append_buffer: proc "c" (buf: sokol.sg_buffer, data : ^sokol.sg_range) -> i32,
+	append_buffer: proc "c" (buf: sokol.sg_buffer, data : rawptr, size: i32) -> i32,
 	update_image: proc "c" (img: sokol.sg_image, data: ^sokol.sg_image_data),
 }
 
 Gfx_Api :: struct {
-	imm: Gfx_Draw_Api,
-	staged: Gfx_Draw_Api,
+	imm: Draw_Api,
+	staged: Draw_Api,
 
 	make_buffer: proc "c" (desc: ^sokol.sg_buffer_desc) -> sokol.sg_buffer,
 	make_pass : proc "c" (desc: ^sokol.sg_pass_desc) -> sokol.sg_pass,
@@ -532,7 +533,7 @@ Gfx_Api :: struct {
 	destroy_pass : proc "c" (pass: sokol.sg_pass),
 	destroy_image: proc "c" (img: sokol.sg_image),
 	make_shader_with_data: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_ref_size: u32, fs_ref_json: [^]u32) -> Shader,
-	register_stage: proc "c" (name: string, parent_stage: Gfx_Stage_Handle) -> Gfx_Stage_Handle,
+	register_stage: proc "c" (name: string, parent_stage: Stage_Handle) -> Stage_Handle,
 	bind_shader_to_pipeline: proc "c" (shd: ^Shader, desc: ^sokol.sg_pipeline_desc, layout: ^Vertex_Layout) -> ^sokol.sg_pipeline_desc,
 
 	texture_white: proc "c" () -> sokol.sg_image,

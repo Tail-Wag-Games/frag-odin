@@ -10,7 +10,7 @@ import "frag:plugin"
 import "frag:private"
 import "frag:vfs"
 
-import imgui "imgui:types"
+import imgui "imgui:api"
 
 import "linchpin:error"
 import "linchpin:job"

@@ -1,4 +1,4 @@
-package types
+package imgui_api
 
 import "thirdparty:cimgui"
 

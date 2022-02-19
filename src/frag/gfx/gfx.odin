@@ -28,7 +28,7 @@ Texture_Manager :: struct {
   default_first_mip: int,
 }
 
-Gfx_Command :: enum {
+Command :: enum {
   Begin_Default_Pass,
   Begin_Pass,
   Apply_Viewport,
@@ -48,55 +48,55 @@ Gfx_Command :: enum {
   Stage_Pop,
 }
 
-Gfx_Command_Buffer_Ref :: struct {
+Command_Buffer_Ref :: struct {
   key: u32,
   cmd_buffer_idx: int,
-  cmd: Gfx_Command,
+  cmd: Command,
   params_offset: int,
 }
 
-Gfx_Command_Buffer :: struct {
+Command_Buffer :: struct {
   params_buff: [dynamic]u8,
-  refs: [dynamic]Gfx_Command_Buffer_Ref,
-  running_stage: api.Gfx_Stage_Handle,
+  refs: [dynamic]Command_Buffer_Ref,
+  running_stage: api.Stage_Handle,
   index: int,
   stage_order: u16,
   cmd_idx: u16,
 }
 
-Gfx_Stream_Buffer :: struct {
+Stream_Buffer :: struct {
   buffer: sokol.sg_buffer,
   offset: lockless.atomic_u32,
-  size: int,
+  size: uint,
 }
 
-Gfx_Stage_State :: enum {
+Stage_State :: enum {
   None,
   Submitting,
   Done,
 }
 
-Gfx_Stage :: struct {
+Stage :: struct {
   name: [32]u8,
   name_hash: u32,
-  state: Gfx_Stage_State,
-  parent: api.Gfx_Stage_Handle,
-  child: api.Gfx_Stage_Handle,
-  next: api.Gfx_Stage_Handle,
-  prev: api.Gfx_Stage_Handle,
+  state: Stage_State,
+  parent: api.Stage_Handle,
+  child: api.Stage_Handle,
+  next: api.Stage_Handle,
+  prev: api.Stage_Handle,
   order: u16,
   enabled: bool,
   single_enabled: bool,
 }
 
-Gfx_Context :: struct {
-  stages: [dynamic]Gfx_Stage,
-  cmd_buffers_feed: []Gfx_Command_Buffer,
-  cmd_buffers_render: []Gfx_Command_Buffer,
+Context :: struct {
+  stages: [dynamic]Stage,
+  cmd_buffers_feed: []Command_Buffer,
+  cmd_buffers_render: []Command_Buffer,
   stage_lock: lockless.Spinlock,
   tex_mgr: Texture_Manager,
   pipelines: [dynamic]sokol.sg_pipeline,
-  stream_buffers: [dynamic]Gfx_Stream_Buffer,
+  stream_buffers: [dynamic]Stream_Buffer,
 
   doomed_buffers: [dynamic]sokol.sg_buffer,
   doomed_shaders: [dynamic]sokol.sg_shader,
@@ -116,7 +116,7 @@ STAGE_ORDER_DEPTH_MASK :: 0xfc00
 STAGE_ORDER_ID_BITS :: 10
 STAGE_ORDER_ID_MASK :: 0x03ff
 
-ctx : Gfx_Context
+ctx : Context
 gfx_alloc: mem.Allocator
 
 run_command_cbs := [17]Run_Command_Callback {
@@ -132,7 +132,7 @@ run_command_cbs := [17]Run_Command_Callback {
   run_cb_end_pass,
   run_cb_begin_default_pass,
   run_cb_begin_default_pass,
-  run_cb_begin_default_pass,
+  run_cb_append_buffer,
   run_cb_begin_default_pass,
   run_cb_begin_default_pass,
   run_begin_cb_stage,
@@ -175,6 +175,30 @@ texture_type_names := map[Texture_Type_Name]sokol.sg_image_type {
   {"2d", false} = .SG_IMAGETYPE_2D,
   {"3d", false} = .SG_IMAGETYPE_3D,
   {"3d", true} = .SG_IMAGETYPE_CUBE,
+}
+
+sg_map_buffer :: proc(buf_id: sokol.sg_buffer, offset: i32, data: rawptr, num_bytes: i32) {
+  buf := sokol.sg_lookup_buffer(buf_id.id)
+  if buf.map_frame_index != sokol.sg_frame_index() {
+    buf.append_pos = 0
+    buf.append_overflow = false
+  }
+
+  if (offset + num_bytes) > buf.size {
+    buf.append_overflow = true
+  }
+
+  if buf.state == .SG_RESOURCESTATE_VALID {
+    buf.append_pos = offset
+    if sokol.sg_validate_append_buffer(&buf, buf_id.id, data, num_bytes) {
+      if !buf.append_overflow && num_bytes > 0 {
+        assert(buf.update_frame_index != sokol.sg_frame_index())
+        assert(buf.append_frame_index != sokol.sg_frame_index())
+        sokol.sg_append_debug_buffer(&buf, buf_id.id, data, num_bytes, buf.map_frame_index != sokol.sg_frame_index())
+        sokol.sg_buffer_set_map_frame(buf_id.id, sokol.sg_frame_index())
+      }
+    }
+  }
 }
 
 bind_shader_to_sg_pipeline :: proc(shd: sokol.sg_shader, inputs: []api.Shader_Input_Reflection_Data, desc: ^sokol.sg_pipeline_desc, layout: ^api.Vertex_Layout) -> ^sokol.sg_pipeline_desc {
@@ -241,7 +265,7 @@ run_cb_end_stage :: proc(buff: []u8, offset: int) -> ([]u8, int) {
   return buff, offset
 }
 
-execute_command_buffer :: proc(cmds: []Gfx_Command_Buffer) -> int {
+execute_command_buffer :: proc(cmds: []Command_Buffer) -> int {
   assert(private.core_api.job_thread_index() == 0, "`execute_command_buffer` should only be invoked from main thread")
 
   cmd_count := 0
@@ -254,7 +278,7 @@ execute_command_buffer :: proc(cmds: []Gfx_Command_Buffer) -> int {
   }
 
   if cmd_count > 0 {
-    refs := make([]Gfx_Command_Buffer_Ref, cmd_count, context.temp_allocator)
+    refs := make([]Command_Buffer_Ref, cmd_count, context.temp_allocator)
     defer delete(refs, context.temp_allocator)
 
     cur_ref_count := 0
@@ -263,14 +287,14 @@ execute_command_buffer :: proc(cmds: []Gfx_Command_Buffer) -> int {
       cb := &cmds[i]
       ref_count := len(cb.refs)
       if ref_count > 0 {
-        mem.copy(&refs[cur_ref_count], mem.raw_dynamic_array_data(cb.refs), size_of(Gfx_Command_Buffer_Ref) * ref_count)
+        mem.copy(&refs[cur_ref_count], mem.raw_dynamic_array_data(cb.refs), size_of(Command_Buffer_Ref) * ref_count)
         cur_ref_count += ref_count
         runtime.clear_dynamic_array(&cb.refs)
       }
     }
     refs = init_refs
 
-    slice.sort_by(refs, proc(x, y: Gfx_Command_Buffer_Ref) -> bool {
+    slice.sort_by(refs, proc(x, y: Command_Buffer_Ref) -> bool {
       return x.key < y.key
     })
 
@@ -297,6 +321,10 @@ execute_command_buffers :: proc () {
   for i in 0 ..< len(ctx.stages) {
     ctx.stages[i].state = .None
   }
+
+  for i in 0 ..< len(ctx.stream_buffers) {
+    ctx.stream_buffers[i].offset = 0
+  }
 }
 
 end_cb_stage :: proc "c" () {
@@ -316,7 +344,7 @@ end_cb_stage :: proc "c" () {
   cb.running_stage = { id = 0 }
 }
 
-make_cb_params_buff :: proc(cb: ^Gfx_Command_Buffer, size: int, offset: ^int) -> ^u8 {
+make_cb_params_buff :: proc(cb: ^Command_Buffer, size: int, offset: ^int) -> ^u8 {
   if size == 0 {
     return nil
   }
@@ -341,7 +369,7 @@ end_cb_pass :: proc "c" () {
   assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
   assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
 
-  ref := Gfx_Command_Buffer_Ref {
+  ref := Command_Buffer_Ref {
     key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .End_Pass,
@@ -350,6 +378,76 @@ end_cb_pass :: proc "c" () {
   append(&cb.refs, ref)
 
   cb.cmd_idx += 1
+}
+
+append_cb_buffer :: proc "c" (buffer: sokol.sg_buffer, data: rawptr, data_size: i32) -> i32 {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  index := -1
+  for i in 0 ..< len(ctx.stream_buffers) {
+    if ctx.stream_buffers[i].buffer.id == buffer.id {
+      index = i
+      break
+    }
+  }
+
+  assert(index != -1, "buffer must be streamed and must not be destroyed during render")
+  sbuffer := &ctx.stream_buffers[index]
+  assert(u32(sbuffer.offset) + u32(data_size) <= u32(sbuffer.size))
+  stream_offset := lockless.atomic_fetch_add32(transmute(^u32)&sbuffer.offset, u32(data_size))
+
+  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
+
+  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
+  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
+
+  offset := 0
+  buff := make_cb_params_buff(cb, int(data_size) + size_of(i32) * 3 + size_of(sokol.sg_buffer), &offset)
+
+  ref := Command_Buffer_Ref {
+    key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
+    cmd_buffer_idx = cb.index,
+    cmd = .Append_Buffer,
+    params_offset = offset,
+  }
+  append(&cb.refs, ref)
+
+  cb.cmd_idx += 1
+
+  (cast(^i32)buff)^ = i32(index)
+  buff = mem.ptr_offset(buff, size_of(i32))
+  (cast(^sokol.sg_buffer)buff)^ = buffer
+  buff = mem.ptr_offset(buff, size_of(sokol.sg_buffer))
+  (cast(^u32)buff)^ = stream_offset
+  buff = mem.ptr_offset(buff, size_of(i32))
+  (cast(^i32)buff)^ = i32(data_size)
+  buff = mem.ptr_offset(buff, size_of(i32))
+  mem.copy(buff, data, int(data_size))
+  
+  sokol.sg_buffer_set_used_frame(buffer.id, private.core_api.frame_index())
+
+  return i32(stream_offset)
+}
+
+run_cb_append_buffer :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  cur_offset := offset
+
+  stream_idx := (cast(^i32)&buff[cur_offset])^
+  cur_offset += size_of(i32)
+  buf := (cast(^sokol.sg_buffer)&buff[cur_offset])^
+  cur_offset += size_of(sokol.sg_buffer)
+  stream_offset := (cast(^i32)&buff[cur_offset])^
+  cur_offset += size_of(i32)
+  data_size := (cast(^i32)&buff[cur_offset])^
+  cur_offset += size_of(i32)
+
+  assert(stream_idx < i32(len(ctx.stream_buffers)))
+  stream_buffer := &ctx.stream_buffers[stream_idx]
+  sg_map_buffer(buf, stream_offset, &buff[cur_offset], data_size)
+  cur_offset += int(data_size)
+
+  return buff, cur_offset
 }
 
 cb_draw :: proc "c" (base_element: i32, num_elements: i32, num_instances: i32) {
@@ -364,7 +462,7 @@ cb_draw :: proc "c" (base_element: i32, num_elements: i32, num_instances: i32) {
   offset := 0
   buff := make_cb_params_buff(cb, size_of(i32) * 3, &offset)
 
-  ref := Gfx_Command_Buffer_Ref {
+  ref := Command_Buffer_Ref {
     key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .Draw,
@@ -406,7 +504,7 @@ apply_cb_pipeline :: proc "c" (pipeline: sokol.sg_pipeline) {
   offset := 0
   buff := make_cb_params_buff(cb, size_of(sokol.sg_pipeline), &offset)
 
-  ref := Gfx_Command_Buffer_Ref {
+  ref := Command_Buffer_Ref {
     key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .Apply_Pipeline,
@@ -442,7 +540,7 @@ apply_cb_bindings :: proc "c" (bind: ^sokol.sg_bindings) {
   offset := 0
   buff := make_cb_params_buff(cb, size_of(sokol.sg_bindings), &offset)
 
-  ref := Gfx_Command_Buffer_Ref {
+  ref := Command_Buffer_Ref {
     key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .Apply_Bindings,
@@ -522,7 +620,7 @@ apply_cb_uniforms :: proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, data
   offset := 0
   buff := make_cb_params_buff(cb, size_of(sokol.sg_shader_stage) + size_of(i32) + int(num_bytes), &offset)
 
-  ref := Gfx_Command_Buffer_Ref {
+  ref := Command_Buffer_Ref {
     key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .Apply_Uniforms,
@@ -569,7 +667,7 @@ begin_cb_pass :: proc "c" (pass: sokol.sg_pass, pass_action: ^sokol.sg_pass_acti
   offset := 0
   buff := make_cb_params_buff(cb, size_of(sokol.sg_pass_action) + size_of(sokol.sg_pass), &offset)
 
-  ref := Gfx_Command_Buffer_Ref {
+  ref := Command_Buffer_Ref {
     key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .Begin_Pass,
@@ -609,7 +707,7 @@ begin_cb_default_pass :: proc "c" (pass_action: ^sokol.sg_pass_action, width: i3
   offset := 0
   buff := make_cb_params_buff(cb, size_of(sokol.sg_pass_action) + size_of(i32) * 2, &offset)
 
-  ref := Gfx_Command_Buffer_Ref {
+  ref := Command_Buffer_Ref {
     key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .Begin_Default_Pass,
@@ -632,7 +730,7 @@ record_cb_end_stage :: proc() {
   assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
   assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
 
-  ref := Gfx_Command_Buffer_Ref {
+  ref := Command_Buffer_Ref {
     key = ((u32(cb.stage_order) << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .Stage_Pop,
@@ -643,13 +741,13 @@ record_cb_end_stage :: proc() {
   cb.cmd_idx += 1
 }
 
-begin_cb_stage :: proc "c" (stage_handle: api.Gfx_Stage_Handle) -> bool {
+begin_cb_stage :: proc "c" (stage_handle: api.Stage_Handle) -> bool {
   context = runtime.default_context()
   context.allocator = gfx_alloc
 
   cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
 
-  stage : ^Gfx_Stage
+  stage : ^Stage
   lockless.lock_enter(&ctx.stage_lock)
   stage = &ctx.stages[api.to_index(stage_handle.id)]
   assert(stage.state == .None, "begin was already called on this stage")
@@ -679,7 +777,7 @@ record_cb_begin_stage :: proc(name: cstring, name_size: int) {
   offset := 0
   buff := make_cb_params_buff(cb, name_size, &offset)
 
-  ref := Gfx_Command_Buffer_Ref {
+  ref := Command_Buffer_Ref {
     key = ((u32(cb.stage_order) << 16) | u32(cb.cmd_idx)),
     cmd_buffer_idx = cb.index,
     cmd = .Stage_Push,
@@ -703,11 +801,11 @@ run_begin_cb_stage :: proc(buff: []u8, offset: int) -> ([]u8, int) {
   return buff, cur_offset
 }
 
-begin_imm_stage :: proc "c" (stage_handle: api.Gfx_Stage_Handle) -> bool {
+begin_imm_stage :: proc "c" (stage_handle: api.Stage_Handle) -> bool {
   context = runtime.default_context()
   context.allocator = gfx_alloc
 
-  stage : ^Gfx_Stage
+  stage : ^Stage
   stage_name: string
 
   lockless.lock_enter(&ctx.stage_lock)
@@ -725,7 +823,7 @@ begin_imm_stage :: proc "c" (stage_handle: api.Gfx_Stage_Handle) -> bool {
   return true
 }
 
-add_child_stage :: proc(parent, child: api.Gfx_Stage_Handle) {
+add_child_stage :: proc(parent, child: api.Stage_Handle) {
   p := &ctx.stages[api.to_index(parent.id)]
   c := &ctx.stages[api.to_index(child.id)]
   if p.child.id > 0 {
@@ -737,11 +835,11 @@ add_child_stage :: proc(parent, child: api.Gfx_Stage_Handle) {
   p.child = child
 }
 
-register_stage :: proc "c" (name: string, parent_stage: api.Gfx_Stage_Handle) -> api.Gfx_Stage_Handle {
+register_stage :: proc "c" (name: string, parent_stage: api.Stage_Handle) -> api.Stage_Handle {
   context = runtime.default_context()
   context.allocator = gfx_alloc
 
-  stage := Gfx_Stage {
+  stage := Stage {
     name_hash = hash.fnv32a(transmute([]u8)name),
     parent = parent_stage,
     enabled = true,
@@ -749,7 +847,7 @@ register_stage :: proc "c" (name: string, parent_stage: api.Gfx_Stage_Handle) ->
   }
   mem.copy(&stage.name[0], mem.raw_string_data(name), size_of(stage.name))
 
-  handle := api.Gfx_Stage_Handle {
+  handle := api.Stage_Handle {
     id = api.to_id(len(ctx.stages)),
   }
 
@@ -772,8 +870,16 @@ register_stage :: proc "c" (name: string, parent_stage: api.Gfx_Stage_Handle) ->
 }
 
 make_buffer :: proc "c" (desc: ^sokol.sg_buffer_desc) -> sokol.sg_buffer {
-  buf := sokol.sg_make_buffer(desc)
-  return buf
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  buf_id := sokol.sg_make_buffer(desc)
+  if desc.usage == .SG_USAGE_STREAM {
+    sbuff := Stream_Buffer { buffer = buf_id, offset = 0, size = desc.size }
+    append(&ctx.stream_buffers, sbuff)
+  }
+
+  return buf_id
 }
 
 make_pipeline :: proc "c" (desc: ^sokol.sg_pipeline_desc) -> sokol.sg_pipeline {
@@ -1132,9 +1238,9 @@ init_textures :: proc() {
   }
 }
 
-create_command_buffers :: proc() -> []Gfx_Command_Buffer {
+create_command_buffers :: proc() -> []Command_Buffer {
   num_threads := int(private.core_api.num_job_threads())
-  cbs := make([]Gfx_Command_Buffer, num_threads)
+  cbs := make([]Command_Buffer, num_threads)
 
   for i in 0 ..< num_threads {
     cbs[i].index = i
@@ -1173,7 +1279,7 @@ init :: proc(desc: ^sokol.sg_desc, allocator := context.allocator) {
   init_shaders()
 }
 
-destroy_buffers :: proc(cbs: []Gfx_Command_Buffer) {
+destroy_buffers :: proc(cbs: []Command_Buffer) {
   for i in 0 ..< private.core_api.num_job_threads() {
     cb := &cbs[i]
     assert(cb.running_stage.id == 0)
@@ -1322,7 +1428,6 @@ init_gfx_api :: proc() {
       end = end_imm_stage,
       update_buffer = sokol.sg_update_buffer,
       update_image = sokol.sg_update_image,
-      append_buffer = sokol.sg_append_buffer,
       begin_default_pass = sokol.sg_begin_default_pass,
       begin_pass = sokol.sg_begin_pass,
       apply_viewport = sokol.sg_apply_viewport,
@@ -1332,6 +1437,7 @@ init_gfx_api :: proc() {
       apply_uniforms = proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, data: rawptr, num_bytes: i32) { sokol.sg_apply_uniforms(stage, ub_index, &{ data, uint(num_bytes) }) },
       draw = sokol.sg_draw,
       end_pass = sokol.sg_end_pass,
+      append_buffer = proc "c" (buffer: sokol.sg_buffer, data: rawptr, num_bytes: i32) -> i32 { return sokol.sg_append_buffer(buffer, &{ data, uint(num_bytes) }) },
     },
     staged = {
       begin = begin_cb_stage,
@@ -1343,6 +1449,7 @@ init_gfx_api :: proc() {
       apply_uniforms = apply_cb_uniforms,
       draw = cb_draw,
       end_pass = end_cb_pass,
+      append_buffer = append_cb_buffer,
     },
     make_buffer = make_buffer,
     make_pass = sokol.sg_make_pass,

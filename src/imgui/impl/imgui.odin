@@ -1,4 +1,4 @@
-package imgui
+package imgui_impl
 
 import "thirdparty:cimgui"
 import "thirdparty:sokol"
@@ -8,9 +8,9 @@ import "linchpin:pool"
 
 import "frag:api"
 
-import "./fonts"
-import "./shaders"
-import "./types"
+import "../fonts"
+import "../shaders"
+import imgui "../api"
 
 
 import _c "core:c"
@@ -47,7 +47,7 @@ Imgui_Context :: struct {
   pipeline: sokol.sg_pipeline,
   bind: sokol.sg_bindings,
   font_tex: sokol.sg_image,
-  stage: api.Gfx_Stage_Handle,
+  stage: api.Stage_Handle,
   mouse_btn_down: [api.MAX_APP_MOUSE_BUTTONS]bool,
   mouse_btn_up: [api.MAX_APP_MOUSE_BUTTONS]bool,
   mouse_weel_h: f32,
@@ -63,7 +63,7 @@ Imgui_Context :: struct {
   docking: bool,
 }
 
-imgui_api := types.Imgui_Api {
+imgui_api := imgui.Imgui_Api {
   CreateContext = cimgui.igCreateContext,
   DestroyContext = cimgui.igDestroyContext,
   GetIO = cimgui.igGetIO,

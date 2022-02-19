@@ -6,6 +6,7 @@ import "frag:api"
 import "frag:private"
 
 import "core:fmt"
+import "core:math"
 import glm "core:math/linalg"
 import "core:mem"
 import "core:runtime"
@@ -16,6 +17,47 @@ Camera_Context :: struct {
 
 ctx : Camera_Context
 
+calc_frustum_points_using_range :: proc "c" (cam: ^api.Camera, fnear: f32, ffar: f32) -> (res : [8]glm.Vector3f32) {
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
+  fov := glm.radians(cam.fov)
+  w := cam.viewport.xmax - cam.viewport.xmin
+  h := cam.viewport.ymax - cam.viewport.ymin
+  aspect := w / h
+
+  xaxis := cam.right
+  yaxis := cam.up
+  zaxis := cam.forward
+  pos := cam.pos
+
+  near_plane_h := math.tan(fov * 0.5) * fnear
+  near_plane_w := near_plane_h * aspect
+
+  far_plane_h := math.tan(fov * 0.5) * ffar
+  far_plane_w := far_plane_h * aspect
+
+  center_near := (zaxis * fnear) + pos
+  center_far := (zaxis * ffar) + pos
+
+  xnear_scaled := xaxis * near_plane_w
+  xfar_scaled := xaxis * far_plane_w
+  ynear_scaled := yaxis * near_plane_h
+  yfar_scaled := yaxis * far_plane_h
+
+  res[0] = center_near - (xnear_scaled + ynear_scaled)
+  res[1] = center_near + (xnear_scaled - ynear_scaled)
+  res[2] = center_near + (xnear_scaled + ynear_scaled)
+  res[3] = center_near - (xnear_scaled - ynear_scaled)
+
+  res[4] = center_far - (xfar_scaled + yfar_scaled)
+  res[5] = center_far - (xfar_scaled - yfar_scaled)
+  res[6] = center_far + (xfar_scaled + yfar_scaled)
+  res[7] = center_far + (xfar_scaled - yfar_scaled)
+
+  return res
+}
+
 init_camera :: proc "c" (cam: ^api.Camera, fov_deg: f32, viewport: geom.Rectangle, fnear: f32, ffar: f32) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
@@ -23,7 +65,7 @@ init_camera :: proc "c" (cam: ^api.Camera, fov_deg: f32, viewport: geom.Rectangl
   cam.pos = {0.0, 0.0, 0.0}
   cam.forward = {0.0, 0.0, -1.0}
   cam.right = glm.VECTOR3F32_X_AXIS
-  cam.up = glm.VECTOR3F32_Y_AXIS  
+  cam.up = glm.VECTOR3F32_Z_AXIS  
 
   cam.quat = glm.QUATERNIONF32_IDENTITY
   cam.fov = fov_deg
@@ -119,8 +161,8 @@ fps_pitch :: proc "c" (fps: ^api.Fps_Camera, pitch: f32) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
   
-  fps.pitch += pitch
-  fps.cam.quat = glm.quaternion_angle_axis_f32(fps.yaw, {0, 1, 0}) * glm.quaternion_angle_axis_f32(fps.pitch, {1, 0, 0})
+  fps.pitch -= pitch
+  fps.cam.quat = glm.quaternion_angle_axis_f32(fps.yaw, {0, 0, 1}) * glm.quaternion_angle_axis_f32(fps.pitch, {1, 0, 0})
   update_rotation(&fps.cam)
 }
 
@@ -128,8 +170,8 @@ fps_yaw :: proc "c" (fps: ^api.Fps_Camera, yaw: f32) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
   
-  fps.yaw += yaw
-  fps.cam.quat = glm.quaternion_angle_axis_f32(fps.yaw, {0, 1, 0}) * glm.quaternion_angle_axis_f32(fps.pitch, {1, 0, 0})
+  fps.yaw -= yaw
+  fps.cam.quat = glm.quaternion_angle_axis_f32(fps.yaw, {0, 0, 1}) * glm.quaternion_angle_axis_f32(fps.pitch, {1, 0, 0})
   update_rotation(&fps.cam)
 }
 
@@ -144,6 +186,7 @@ init_camera_api :: proc() {
     look_at = look_at,
     perspective_mat = perspective_mat,
     view_mat = view_mat,
+    calc_frustum_points_using_range = calc_frustum_points_using_range,
     init_fps_camera = init_fps_camera,
     fps_look_at = fps_look_at,
     fps_pitch = fps_pitch,
