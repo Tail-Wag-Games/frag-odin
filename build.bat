@@ -25,7 +25,7 @@ if exist ".\thirdparty\cimgui\cimgui.lib" if exist ".\thirdparty\cimgui\cimguid.
 call .\thirdparty\cimgui\build.bat
 if NOT %ERRORLEVEL% == 0 goto :EOF
 :IMGUI_CONTINUE
-if exist ".\thirdparty\sokol\sokol.lib" if exist ".\thirdparty\sokol\sokold.lib" goto :SOKOL_CONTINUE
+@REM if exist ".\thirdparty\sokol\sokol.lib" if exist ".\thirdparty\sokol\sokold.lib" goto :SOKOL_CONTINUE
 :SOKOL_BUILD
 call .\thirdparty\sokol\build.bat
 if NOT %ERRORLEVEL% == 0 goto :EOF

@@ -46,7 +46,7 @@ create_bin :: proc(item_size: int, capacity: int) -> ^Bin {
 
   for i in 0 ..< capacity {
     res.ptrs[capacity - i - 1] =
-      cast(^Node)&res.buff[(size_of(Node) +item_size) * i]
+      cast(^Node)&res.buff[(size_of(Node) + item_size) * i]
   }
 
   return res
@@ -67,7 +67,7 @@ create :: proc(item_size: int, capacity: int) -> (^Queue, error.Error) {
 
   for i in 0 ..< aligned_capacity {
     res.ptrs[aligned_capacity - i - 1] =
-      cast(^Node)&res.buff[(size_of(Node) +item_size) * i]
+      cast(^Node)&res.buff[(size_of(Node) + item_size) * i]
   }
 
   res.iter -= 1

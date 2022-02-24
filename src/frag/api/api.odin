@@ -4,6 +4,7 @@ import "thirdparty:getopt"
 import "thirdparty:sokol"
 
 import "linchpin:error"
+import "linchpin:job"
 import "linchpin:math/geom"
 import "linchpin:memio"
 
@@ -13,11 +14,15 @@ import "core:mem"
 import "core:runtime"
 
 PLUGIN_UPDATE_INTERVAL :: f32(1.0)
+MAX_PATH :: 256
 MAX_PLUGINS :: 64
+
 
 MAX_APP_TOUCHPOINTS :: 8
 MAX_APP_MOUSE_BUTTONS :: 3
 MAX_APP_KEY_CODES :: 512
+
+ASSET_POOL_SIZE :: 256
 
 Config :: struct {
   app_name: cstring,
@@ -299,7 +304,23 @@ App_Api :: struct {
 	logger: proc "c" () -> ^log.Logger,
 }
 
-Asset_Obj :: struct #raw_union {
+Asset_Load_Flag :: distinct u32
+
+ASSET_LOAD_FLAG_NONE :: Asset_Load_Flag(0x0)
+ASSET_LOAD_FLAG_ABSOLUTE_PATH :: Asset_Load_Flag(0x1)
+ASSET_LOAD_FLAG_WAIT_ON_LOAD :: Asset_Load_Flag(0x2)
+ASSET_LOAD_FLAG_RELOAD :: Asset_Load_Flag(0x4)
+
+Asset_Load_Flags :: Asset_Load_Flag
+
+Asset_State :: enum i32 {
+	Zombie,
+	Ok,
+	Failed,
+	Loading,
+}
+
+Asset_Object :: struct #raw_union {
 	id: uintptr,
 	ptr: rawptr,
 }
@@ -308,25 +329,38 @@ Asset_Handle :: struct {
 	id: u32,
 }
 
+Asset_Meta_Key_Val :: struct {
+	key: [32]u8,
+	val: [32]u8,
+}
+
 Asset_Load_Params :: struct {
 	path: cstring,
 	params: any,
+	tags: u32,
+	flags: Asset_Load_Flags,
+	num_meta: u32,
+	metas: [^]Asset_Meta_Key_Val,
 }
 
 Asset_Load_Data :: struct {
-	obj: Asset_Obj,
+	obj: Asset_Object,
+	user1: rawptr,
+	user2: rawptr,
 }
 
 Asset_Callbacks :: struct {
-	on_prepare: proc(params: ^Asset_Load_Params, mem: ^memio.Mem_Block),
-	on_load: proc(data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^memio.Mem_Block),
+	on_prepare: proc(params: ^Asset_Load_Params, mem: ^memio.Mem_Block) -> Asset_Load_Data,
+	on_load: proc(data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^memio.Mem_Block) -> bool,
 	on_finalize: proc(data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^memio.Mem_Block),
-	on_reload: proc(handle: Asset_Handle, prev_obj: Asset_Obj),
-	on_release: proc (obj: Asset_Obj),
+	on_reload: proc(handle: Asset_Handle, prev_obj: Asset_Object),
+	on_release: proc (obj: Asset_Object),
 }
 
 Asset_Api :: struct {
-	register_asset_type: proc "c" (name: cstring, callbacks: Asset_Callbacks),
+	register_asset_type : proc "c" (name: cstring, callbacks: Asset_Callbacks, params_type_name: cstring, params_size: i32),
+
+	load : proc "c" (name: cstring, path: cstring, params: rawptr, flags: Asset_Load_Flags, tags: u32) -> Asset_Handle,
 }
 
 Core_Flag :: enum i32 {
@@ -349,6 +383,8 @@ Core_Api :: struct {
 	frame_duration: proc "c" () -> f64,
 	frame_time: proc "c" () -> f64,
 	frame_index: proc "c" () -> i64,
+	
+	dispatch_job : proc "c" (count: i32, callback: proc "c" (start, end, thread_idx: i32, user: rawptr), user: rawptr, priority: job.Job_Priority = .Normal, tags: u32 = u32(0)) -> job.Job_Handle,
 	job_thread_index: proc "c" () -> i32,
 	num_job_threads: proc "c" () -> i32,
 }
@@ -460,19 +496,31 @@ Shader_Info :: struct {
 	name_handle: u32,
 }
 
+Texture_Load_Params :: struct {
+	first_mip: i32,
+	min_filter: sokol.sg_filter,
+	mag_filter: sokol.sg_filter,
+	wrap_u: sokol.sg_wrap,
+	wrap_v: sokol.sg_wrap,
+	wrap_w: sokol.sg_wrap,
+	fmt: sokol.sg_pixel_format,
+	aniso: i32,
+	srgb: bool,
+}
+
 Texture_Info :: struct {
 	name_handle: u32,
 	image_type: sokol.sg_image_type,
 	format: sokol.sg_pixel_format,
-	size_in_bytes: int,
-	width: int,
-	height: int,
+	size_in_bytes: i32,
+	width: i32,
+	height: i32,
 	using dl: struct #raw_union {
-		depth: int,
-		layers: int,
+		depth: i32,
+		layers: i32,
 	},
-	mips: int,
-	bpp: int,
+	mips: i32,
+	bpp: i32,
 }
 
 Texture :: struct {
@@ -535,6 +583,7 @@ Gfx_Api :: struct {
 	make_shader_with_data: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_ref_size: u32, fs_ref_json: [^]u32) -> Shader,
 	register_stage: proc "c" (name: string, parent_stage: Stage_Handle) -> Stage_Handle,
 	bind_shader_to_pipeline: proc "c" (shd: ^Shader, desc: ^sokol.sg_pipeline_desc, layout: ^Vertex_Layout) -> ^sokol.sg_pipeline_desc,
+	alloc_image: proc "c" () -> sokol.sg_image,
 
 	texture_white: proc "c" () -> sokol.sg_image,
 	texture_black: proc "c" () -> sokol.sg_image,
@@ -589,9 +638,21 @@ Plugin_Api :: struct {
 	get_api_by_name: proc "c" (name: cstring) -> rawptr,
 }
 
+VFS_FLAG_NONE :: Vfs_Flags(0x01)
+VFS_FLAG_ABSOLUTE_PATH :: Vfs_Flags(0x02)
+VFS_FLAG_TEXT_FILE :: Vfs_Flags(0x04)
+VFS_FLAG_APPEND :: Vfs_Flags(0x08)
+
+Vfs_Flags :: distinct u32
+
+Async_Read_Callback :: proc "c" (path: cstring, mem: ^memio.Mem_Block, user_data: rawptr)
+Async_Write_Callback :: proc "c" (path: cstring, bytes_written: i32, mem: ^memio.Mem_Block, user_data: rawptr)
+
 Vfs_Api :: struct {
 	mount: proc "c" (path: cstring, alias: cstring, watch: bool) -> error.Error,
 	register_modify_cb: proc "c" (modify_cb: proc "c" (path: cstring)),
+	read_async : proc "c" (path: cstring, flags: Vfs_Flags, read_fn: Async_Read_Callback, user: rawptr),
+	read : proc "c" (path: cstring, flags: Vfs_Flags) -> ^memio.Mem_Block,
 }
 
 to_id :: proc(idx: int) -> u32 {

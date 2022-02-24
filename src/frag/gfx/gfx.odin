@@ -9,11 +9,15 @@ import "linchpin:memio"
 import "frag:api"
 import "frag:private"
 
+import stbi "vendor:stb/image"
+
 import _c "core:c"
 import "core:encoding/json"
 import "core:fmt"
 import "core:hash"
+import "core:math/big"
 import "core:mem"
+import "core:path/filepath"
 import "core:runtime"
 import "core:slice"
 import "core:strings"
@@ -1164,13 +1168,90 @@ destroy_image :: proc "c" (img: sokol.sg_image) {
   }
 }
 
-on_prepare_shader :: proc (params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
+mipcnt :: proc(x, y, z: i32) -> i32 {
+  return big.ilog2(max(max(x,y), z))
+}
+
+on_prepare_texture :: proc (params: ^api.Asset_Load_Params, mb: ^memio.Mem_Block) -> api.Asset_Load_Data {
+  res := new(api.Texture)
+
+  info := &res.info
+  ext := filepath.ext(string(params.path))
+  // TODO:
+  // Need to check extension to vary loading ktx / dds
+
+  comp : i32
+  if bool(stbi.info_from_memory(transmute([^]u8)mb.data, i32(mb.size), &info.width, &info.height, &comp)) {
+    assert(info.width > 0 && info.height > 0, fmt.tprintf("invalid image size (%d,%d): %s", info.width, info.height, params.path))
+
+    is_16_bit := bool(stbi.is_16_bit_from_memory(transmute([^]u8)mb.data, i32(mb.size)))
+    mipcnt := is_16_bit ? mipcnt(info.width, info.height, 1) : 1
+    // if is_16_bit {
+    //   w := info.width
+    //   h := info.height
+    //   texels := transmute([^]u16)mb.data
+    //   mipcnt := mipcnt(w, h, 1)
+    //   tex := make([]u16, w * h * 2)
+
+    //   for y in 0 ..< h {
+    //     for x in 0 ..< w {
+    //       z := texels[i + w * j]
+    //       zf := f32(z) / f32((1 << 16) - 1)
+    //       z2 := zf * zf ((1 << 16) - 1)
+
+    //       tex[2 * (i + w * j)] = z
+    //       tex[1 + 2 * (i + w * j)] = z2
+    //     }
+    //   }
+    // }
+
+    info.image_type = .SG_IMAGETYPE_2D
+    info.format = is_16_bit ? .SG_PIXELFORMAT_RG16 : .SG_PIXELFORMAT_RGBA8
+    info.size_in_bytes = is_16_bit ? 2 * info.width * info.height : 4 * info.width * info.height
+    info.layers = 1
+    info.mips = mipcnt
+    info.bpp = is_16_bit ? 16 : 32
+  } else {
+    fmt.println("reading image matadata failed")
+    mem.zero(info, size_of(api.Texture_Info))
+  }
+
+  res.img = private.gfx_api.alloc_image()
+  assert(bool(res.img.id))
+
+  user_data := new(sokol.sg_image_desc, gfx_alloc)
+
+  return { obj = { ptr =  res }, user1 = user_data }
+} 
+
+
+on_load_texture :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) -> bool {
+  return true
+}
+
+
+on_finalize_texture :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
 
 }
 
 
-on_load_shader :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
+on_reload_texture :: proc (handle: api.Asset_Handle, prev_obj: api.Asset_Object) {
 
+}
+
+
+on_release_texture :: proc (obj: api.Asset_Object) {
+  
+}
+
+on_prepare_shader :: proc (params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) -> api.Asset_Load_Data {
+  fmt.println("Inside on prepare shader!")
+  return {}
+}
+
+
+on_load_shader :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) -> bool {
+  return true
 }
 
 
@@ -1179,12 +1260,12 @@ on_finalize_shader :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_
 }
 
 
-on_reload_shader :: proc (handle: api.Asset_Handle, prev_obj: api.Asset_Obj) {
+on_reload_shader :: proc (handle: api.Asset_Handle, prev_obj: api.Asset_Object) {
 
 }
 
 
-on_release_shader :: proc (obj: api.Asset_Obj) {
+on_release_shader :: proc (obj: api.Asset_Object) {
 
 }
 
@@ -1196,7 +1277,7 @@ init_shaders :: proc() {
     on_finalize = on_finalize_shader,
     on_reload = on_reload_shader,
     on_release = on_release_shader,
-  })
+  }, nil, 0)
 }
 
 texture_white :: proc "c" () -> sokol.sg_image {
@@ -1236,6 +1317,19 @@ init_textures :: proc() {
       bpp = 32,
     },
   }
+
+  private.asset_api.register_asset_type(
+    "texture",
+    {
+      on_prepare = on_prepare_texture,
+      on_load = on_load_texture,
+      on_finalize = on_finalize_texture,
+      on_reload = on_reload_texture,
+      on_release = on_release_texture,
+    },
+    "Texture_Load_Params",
+    size_of(api.Texture_Load_Params),
+  )
 }
 
 create_command_buffers :: proc() -> []Command_Buffer {
@@ -1463,6 +1557,7 @@ init_gfx_api :: proc() {
     make_shader_with_data = make_shader_with_data,
     register_stage = register_stage,
     bind_shader_to_pipeline = bind_shader_to_pipeline,
+    alloc_image = sokol.sg_alloc_image,
     texture_white = texture_white,
     texture_black = texture_black,
   }

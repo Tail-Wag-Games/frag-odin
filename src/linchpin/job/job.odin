@@ -13,13 +13,13 @@ import "core:runtime"
 import "core:sync"
 import "core:thread"
 
-Job_Callback :: proc (range_start: int, range_end: int, thread_index: int, user_data: rawptr)
+Job_Callback :: proc "c" (range_start: i32, range_end: i32, thread_index: i32, user_data: rawptr)
 Job_Thread_Init_Callback :: proc (ctx: ^Job_Context, thread_index: int, thread_id: int, user_data: rawptr)
 Job_Thread_Shutdown_Callback :: proc (ctx: ^Job_Context, thread_index: int, thread_id: int, user_data: rawptr)
 
 Job_Handle :: ^u32
 
-Job_Priority :: enum {
+Job_Priority :: enum i32 {
   High,
   Normal,
   Low,
@@ -77,6 +77,7 @@ Job_Context :: struct {
   counter_pool: ^pool.Pool,
   waiting_list: [Job_Priority.Count]^Job,
   waiting_list_last: [Job_Priority.Count]^Job,
+  tags: []u32,
   job_lock: lockless.Spinlock,
   counter_lock: lockless.Spinlock,
   sem: sync.Semaphore,
@@ -177,6 +178,31 @@ job_selector_fn :: proc "c" (transfer: fcontext.FContext_Transfer) {
   }
 
   fcontext.jump_fcontext(transfer.ctx, transfer.data)
+}
+
+dispatch :: proc(ctx: ^Job_Context, count: i32, callback: Job_Callback, user: rawptr, priority: Job_Priority, tags: u32) -> Job_Handle {
+  assert(count > 0)
+
+  num_workers := i32(0)
+  if tags != 0 {
+    for i in 0 ..< len(ctx.threads) + 1 {
+      if bool(ctx.tags[i] & tags) {
+        num_workers += 1
+      }
+    }
+  } else {
+    num_workers = i32(len(ctx.threads)) + 1
+  }
+
+  range_size := count / num_workers
+  range_remainder := count % num_workers
+  num_jobs := range_size > 0 ? num_workers : (range_remainder > 0 ? range_remainder : 0)
+  assert(num_jobs > 0)
+  assert(num_jobs <= i32(ctx.job_pool.capacity), "exceeded max configured number of jobs - update configuration settings")
+
+  counter : Job_Handle
+  lockless.lock_enter(&ctx.counter_lock)
+  counter = cast(Job_Handle)pool.new_and_grow(ctx.counter_pool)
 }
 
 main_thread_job_selector :: proc "c" (transfer: fcontext.FContext_Transfer) {

@@ -10,7 +10,7 @@ DLL_EXT :: ".dll"
 MIN_STACK_SIZE :: 32768 // 32kb
 
 dlerr :: proc() -> string {
-  when ODIN_OS == "windows" {
+  when ODIN_OS == .Windows {
     return fmt.tprintf("%d", win32.get_last_error())
   }
 }

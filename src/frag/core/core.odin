@@ -75,6 +75,14 @@ num_job_threads :: proc "c" () -> i32 {
   return i32(ctx.num_threads)
 }
 
+dispatch_job :: proc "c" (count: i32, callback: proc "c" (start, end, thread_idx: i32, user: rawptr), user: rawptr, priority: job.Job_Priority = .Normal, tags: u32 = u32(0)) -> job.Job_Handle {
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
+  assert(ctx.job_ctx != nil)
+  return job.dispatch(ctx.job_ctx, count, callback, user, priority, tags)
+}
+
 frame :: proc() {
   if ctx.paused {
     return
@@ -95,6 +103,7 @@ frame :: proc() {
     ctx.fps_frame = f32(fps)
   }
 
+  vfs.update()
   gfx.update()
 
   plugin.update(dt)
@@ -159,6 +168,8 @@ init_core_api :: proc() {
     frame_duration = sokol.sapp_frame_duration,
     frame_time = frame_time,
     frame_index = frame_index,
+    
+    dispatch_job = dispatch_job,
     job_thread_index = job_thread_index,
     num_job_threads = num_job_threads,
   }

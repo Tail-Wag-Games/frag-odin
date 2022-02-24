@@ -19,9 +19,6 @@ import "core:strings"
 import "core:sync"
 import "core:thread"
 
-Async_Read_Callback :: proc (path: string, mem: ^memio.Mem_Block, user_data: rawptr)
-Async_Write_Callback :: proc (path: string, bytes_written: int, mem: ^memio.Mem_Block, user_data: rawptr)
-
 Dmon_Result :: struct {
   action: dmon.Action,
   path: string,
@@ -39,25 +36,16 @@ Response_Code :: enum {
   Write_Ok,
 }
 
-Flag :: enum {
-  None,
-  Absolute_Path,
-  Text_File,
-  Append,
-}
-
-Flags :: bit_set[Flag]
-
 Async_Request :: struct {
-  command: Async_Command,
-  flags: Flags,
+  cmd: Async_Command,
+  flags: api.Vfs_Flags,
   path: string,
   write_mem: ^memio.Mem_Block,
-  using rw: struct #raw_union {
-    read_fn: Async_Read_Callback,
-    write_fn: Async_Write_Callback,
+  using rw_cb: struct #raw_union {
+    read_fn: api.Async_Read_Callback,
+    write_fn: api.Async_Write_Callback,
   },
-  user_data: rawptr,
+  user: rawptr,
 }
 
 Async_Response :: struct {
@@ -67,10 +55,10 @@ Async_Response :: struct {
     write_mem: ^memio.Mem_Block,
   },
   using rw_cb: struct #raw_union {
-    read_fn: Async_Read_Callback,
-    write_fn: Async_Write_Callback,
+    read_fn: api.Async_Read_Callback,
+    write_fn: api.Async_Write_Callback,
   },
-  user_data: rawptr,
+  user: rawptr,
   bytes_written: int,
   path: string,
 }
@@ -93,9 +81,9 @@ Context :: struct {
   dmon_queue: ^spsc.Queue,
 }
 
-
 ctx : Context
-dmon_event_cb :: proc "c" (watch_id: dmon.Watch_Id, action: dmon.Action, rootdir: cstring, file: cstring, old_filepath: cstring, user_data: rawptr) {
+
+dmon_event_cb :: proc "c" (watch_id: dmon.Watch_Id, action: dmon.Action, rootdir: cstring, file: cstring, old_filepath: cstring, user: rawptr) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
@@ -176,7 +164,7 @@ load_text_file :: proc(path: string) -> (res: ^memio.Mem_Block, err: error.Error
 
   size, size_err := os.file_size(handle)
   if size_err != os.ERROR_NONE && size > 0 {
-    res = memio.create_mem_block(size + 1, nil, 0) or_return
+    res = memio.create_block(size + 1, nil, 0) or_return
     os.read_ptr(handle, res.data, int(size))
     os.close(handle)
     (cast([^]rune)res.data)[size] = rune(0)
@@ -189,39 +177,41 @@ load_text_file :: proc(path: string) -> (res: ^memio.Mem_Block, err: error.Error
 }
 
 
-load_binary_file :: proc(path: string) -> (res: ^memio.Mem_Block, err: error.Error = nil) {
-   handle, open_err := os.open(path)
+load_binary_file :: proc(path: string) -> (^memio.Mem_Block, error.Error) {
+  handle, open_err := os.open(path)
   if open_err != os.ERROR_NONE {
-    return res, .None
+    return nil, .None
   }
   defer os.close(handle)
 
   size, size_err := os.file_size(handle)
   if size_err != os.ERROR_NONE {
-    return res, .None
+    return nil, .None
   }
 
   if size > 0 {
-    res, mem_err := memio.create_mem_block(size, nil, 0)
+    res, mem_err := memio.create_block(size, nil, 0)
     if mem_err != nil {
-      return res, .None
+      return nil, .None
     }
-    res = memio.create_mem_block(size, nil, 0) or_return
-    os.read_ptr(handle, res.data, int(size))
-    os.close(handle)
+    
+    read, err := os.read_ptr(handle, res.data, int(size))
+    if bool(err) {
+      return nil, .None
+    }
     return res, nil
   }
 
-  return res, .None
+  return nil, .None
 }
 
 
-resolve_path :: proc(path: string, flags: Flags) -> (res: string, err: error.Error = nil) {
-  if .Absolute_Path in flags {
+resolve_path :: proc(path: string, flags: api.Vfs_Flags) -> (res: string, err: error.Error = nil) {
+  if bool(flags & api.VFS_FLAG_ABSOLUTE_PATH) {
     return filepath.clean(path, context.temp_allocator), nil
   } else {
     for mp in &ctx.mounts {
-      if path == mp.alias {
+      if strings.contains(path, mp.alias) {
         return filepath.join(mp.path, filepath.clean(path[len(mp.alias):], context.temp_allocator)), nil
       }
     }
@@ -232,28 +222,42 @@ resolve_path :: proc(path: string, flags: Flags) -> (res: string, err: error.Err
 }
 
 
-read :: proc(path: string, flags: Flags) -> (res: ^memio.Mem_Block, err: error.Error = nil) {
+read :: proc(path: string, flags: api.Vfs_Flags) -> (res: ^memio.Mem_Block, err: error.Error = nil) {
   resolved_path := resolve_path(path, flags) or_return
-  if .Text_File in flags {
+  if bool(flags & api.VFS_FLAG_TEXT_FILE) {
     return load_text_file(resolved_path) or_return, nil
    } else {
      return load_binary_file(resolved_path) or_return, nil
    } 
 }
 
+read_async :: proc "c" (path: cstring, flags: api.Vfs_Flags, read_fn: api.Async_Read_Callback, user: rawptr) {
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
+  req := Async_Request {
+    cmd = .Read,
+    flags = flags,
+    user = user,
+    path = strings.clone_from_cstring(path, context.temp_allocator),
+  }
+  req.rw_cb.read_fn = read_fn
+  spsc.produce_and_grow(ctx.req_queue, &req)
+  sync.semaphore_post(&ctx.worker_sem, 1)
+}
 
 worker_thread_fn :: proc(_: ^thread.Thread) {
   for !ctx.quit {
     req : Async_Request
-    if spsc.consume(ctx.res_queue, &req) {
+    if spsc.consume(ctx.req_queue, &req) {
       res := Async_Response{bytes_written = -1}
       res.path = req.path
-      res.user_data = req.user_data
+      res.user = req.user
 
-      switch req.command {
+      switch req.cmd {
         case .Read:
           res.read_fn = req.read_fn
-          mem, err := read(req.path, req.flags); if err == .None {
+          mem, err := read(req.path, req.flags); if err == nil {
             res.code = .Read_Ok
             res.read_mem = mem
           } else {
@@ -273,10 +277,10 @@ update :: proc() {
   for spsc.consume(ctx.res_queue, &res) {
     switch res.code {
       case .Read_Ok, .Read_Failed: {
-        res.read_fn(res.path, res.read_mem, res.user_data)
+        res.read_fn(strings.clone_to_cstring(res.path, context.temp_allocator), res.read_mem, res.user)
       }
       case .Write_Ok, .Write_Failed: {
-        res.write_fn(res.path, res.bytes_written, res.write_mem, res.user_data)
+        res.write_fn(strings.clone_to_cstring(res.path, context.temp_allocator), i32(res.bytes_written), res.write_mem, res.user)
       }
     }
   }
@@ -334,5 +338,6 @@ init_vfs_api :: proc() {
   private.vfs_api = {
     mount = mount,
     register_modify_cb = register_modify_cb,
+    read_async = read_async,
   }
 }
