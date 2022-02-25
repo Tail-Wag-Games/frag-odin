@@ -18,8 +18,19 @@ Pool :: struct {
   pages: ^Pool_Page,
 }
 
-fetch_From_pool :: proc(pool: ^Pool) -> rawptr {
+fetch_from :: proc(pool: ^Pool) -> rawptr {
+  page := pool.pages
+  for page.iter == 0 && page.next != nil {
+    page = page.next
+  }
 
+  if page.iter > 0 {
+    page.iter -= 1
+    return page.ptrs[page.iter]
+  } else {
+    assert(false, "pool is at capacity")
+    return nil
+  }
 }
 
 delete_from_pool :: proc(pool: ^Pool, ptr: rawptr) {
@@ -43,12 +54,25 @@ delete_from_pool :: proc(pool: ^Pool, ptr: rawptr) {
 }
 
 create_page :: proc(pool: ^Pool) -> ^Pool_Page {
-  cap := pool.capacity
-  item_sz := pool.item_size
+  capacity := pool.capacity
+  item_size := pool.item_size
 
-  res, _ := mem.new_aligned(Pool_Page, 16)
+  buff_slice, _ := mem.make_aligned([]u8, size_of(Pool_Page) + (item_size + size_of(rawptr)) * capacity, 16)
+  buff := &buff_slice[0]
 
-  return nil
+  page := cast(^Pool_Page)buff
+  buff = mem.ptr_offset(buff,size_of(Pool_Page))
+  page.iter = capacity
+  page.ptrs = cast([^]rawptr)buff
+  buff = mem.ptr_offset(buff,size_of(rawptr) * capacity)
+  page.buff = buff
+  page.next = nil
+  for i in 0 ..< capacity {
+    page.ptrs[capacity - i - 1] = mem.ptr_offset(&page.buff[0], i * item_size)
+  }
+  mem.zero(page.buff, capacity * item_size)
+
+  return page
 }
 
 create_pool :: proc(item_size: int, capacity: int) -> (^Pool, mem.Allocator_Error) {
@@ -105,11 +129,22 @@ is_full :: proc(pool: ^Pool) -> bool {
   return true
 }
 
+is_full_n :: proc(pool: ^Pool, #any_int n: int) -> bool {
+  page := pool.pages
+  for page != nil {
+    if page.iter - n >= 0 {
+      return false
+    }
+    page = page.next
+  }
+  return true
+}
+
 new_and_grow :: proc(pool: ^Pool) -> rawptr {
   if is_full(pool) {
     grow(pool)
   }
-  return fetch_From_pool(pool)
+  return fetch_from(pool)
 }
 
 destroy_pool :: proc(pool: ^Pool) {
@@ -125,7 +160,6 @@ destroy_pool :: proc(pool: ^Pool) {
     pool.capacity = 0
     pool.pages.iter = 0
     pool.pages.next = nil
-    free(pool.pages)
     free(pool)
   }
 }

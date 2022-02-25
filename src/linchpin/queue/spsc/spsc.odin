@@ -190,6 +190,8 @@ produce_and_grow :: proc(queue: ^Queue, data: rawptr) -> bool {
 
 destroy_bin :: proc(bin: ^Bin) {
   assert(bin != nil)
+  delete(bin.ptrs)
+  delete(bin.buff)
   free(bin)
 }
 

@@ -30,7 +30,7 @@ Job :: struct {
   job_index: int,
   done: bool,
   owner_tid: int,
-  tags: int,
+  tags: u32,
   stack_mem: fcontext.FContext_Stack,
   fiber: fcontext.FContext,
   selector_fiber: fcontext.FContext,
@@ -44,6 +44,16 @@ Job :: struct {
   priority: Job_Priority,
   next: ^Job,
   prev: ^Job,
+}
+
+Pending_Job :: struct {
+  counter: Job_Handle,
+  range_size: int,
+  range_remainder: int,
+  callback: Job_Callback,
+  user: rawptr,
+  priority: Job_Priority,
+  tags: u32,
 }
 
 Selected_Job :: struct {
@@ -80,11 +90,13 @@ Job_Context :: struct {
   tags: []u32,
   job_lock: lockless.Spinlock,
   counter_lock: lockless.Spinlock,
+  dummy_counter: lockless.atomic_u32,
   sem: sync.Semaphore,
   quit: bool,
   thread_init_cb: Job_Thread_Init_Callback,
   thread_shutdown_cb: Job_Thread_Shutdown_Callback,
   thread_user_data: rawptr,
+  pending: [dynamic]Pending_Job,
 }
 
 COUNTER_POOL_SIZE :: 256
@@ -93,6 +105,47 @@ DEFAULT_FIBER_STACK_SIZE :: 1048576    // 1MB
 
 @(private, thread_local)
 tl_thread_data: ^Job_Thread_Data
+
+fiber_fn :: proc "c" (transfer: fcontext.FContext_Transfer) {
+
+}
+
+new_job :: proc(ctx: ^Job_Context, index: int, callback: Job_Callback, user: rawptr, range_start: int, range_end: int, counter: Job_Handle, tags: u32, priority: Job_Priority) -> ^Job {
+  j := cast(^Job)pool.fetch_from(ctx.job_pool)
+
+  if j != nil {
+    j.job_index = index
+    j.owner_tid = 0
+    j.tags = tags
+    j.done = false
+    if j.stack_mem.sptr == nil {
+      j.stack_mem = fcontext.create_fcontext_stack(uint(ctx.stack_size))
+    }
+    j.fiber = fcontext.make_fcontext(j.stack_mem.sptr, j.stack_mem.ssize, fiber_fn)
+    j.counter = counter
+    j.wait_counter = transmute(Job_Handle)&ctx.dummy_counter
+    j.ctx = ctx
+    j.callback = callback
+    j.user_data = user
+    j.range_start = range_start
+    j.range_end = range_end
+    j.priority = priority
+    j.prev = nil
+    j.next = j.prev
+  }
+  return j
+}
+
+add_job_to_list :: proc(pfirst: ^^Job, plast: ^^Job, node: ^Job) {
+  if plast^ != nil {
+    plast^.next = node
+    node.prev = plast^
+  }
+  plast^ = node
+  if pfirst^ == nil {
+    pfirst^ = node
+  }
+}
 
 delete_job :: proc(ctx: ^Job_Context, job: ^Job) {
   lockless.lock_enter(&ctx.job_lock)
@@ -183,7 +236,7 @@ job_selector_fn :: proc "c" (transfer: fcontext.FContext_Transfer) {
 dispatch :: proc(ctx: ^Job_Context, count: i32, callback: Job_Callback, user: rawptr, priority: Job_Priority, tags: u32) -> Job_Handle {
   assert(count > 0)
 
-  num_workers := i32(0)
+  num_workers := 0
   if tags != 0 {
     for i in 0 ..< len(ctx.threads) + 1 {
       if bool(ctx.tags[i] & tags) {
@@ -191,18 +244,64 @@ dispatch :: proc(ctx: ^Job_Context, count: i32, callback: Job_Callback, user: ra
       }
     }
   } else {
-    num_workers = i32(len(ctx.threads)) + 1
+    num_workers = len(ctx.threads) + 1
   }
 
-  range_size := count / num_workers
-  range_remainder := count % num_workers
+  range_size := int(count) / num_workers
+  range_remainder := int(count) % num_workers
   num_jobs := range_size > 0 ? num_workers : (range_remainder > 0 ? range_remainder : 0)
   assert(num_jobs > 0)
-  assert(num_jobs <= i32(ctx.job_pool.capacity), "exceeded max configured number of jobs - update configuration settings")
+  assert(num_jobs <= ctx.job_pool.capacity, "exceeded max configured number of jobs - update configuration settings")
 
   counter : Job_Handle
   lockless.lock_enter(&ctx.counter_lock)
   counter = cast(Job_Handle)pool.new_and_grow(ctx.counter_pool)
+  lockless.lock_exit(&ctx.counter_lock)
+
+  if counter == nil {
+    assert(false, "exceeded maximum number of job instances")
+    return nil
+  }
+
+  lockless.atomic_store32_explicit(transmute(^lockless.Atomic_Ptr)counter, u32(num_jobs), .Release)
+  assert(tl_thread_data != nil, "dispatch must be called from the main thread or another job worker thread")
+
+  if tl_thread_data.current_job != nil {
+    tl_thread_data.current_job.wait_counter = counter
+  }
+
+  lockless.lock_enter(&ctx.job_lock)
+  if !pool.is_full_n(ctx.job_pool, num_jobs) {
+    range_start := 0
+    range_end := range_size + (range_remainder > 0 ? 1 : 0)
+    range_remainder -= 1
+
+    for i in 0 ..< num_jobs {
+      add_job_to_list(&ctx.waiting_list[priority], &ctx.waiting_list_last[priority],
+        new_job(ctx, i, callback, user, range_start, range_end, counter, tags, priority))
+      
+      range_start = range_end
+      range_end += (range_size + (range_remainder > 0 ? 1 : 0))
+      range_remainder -= 1
+    }
+    assert(range_remainder <= 0)
+
+    sync.semaphore_post(&ctx.sem, num_jobs)
+  } else {
+    pending := Pending_Job {
+      counter = counter,
+      range_size = range_size,
+      range_remainder = range_remainder,
+      callback = callback,
+      user = user,
+      priority = priority,
+      tags = tags,
+    }
+    append(&ctx.pending, pending)
+  }
+  lockless.lock_exit(&ctx.job_lock)
+
+  return counter
 }
 
 main_thread_job_selector :: proc "c" (transfer: fcontext.FContext_Transfer) {
