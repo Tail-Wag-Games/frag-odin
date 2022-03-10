@@ -44,20 +44,20 @@ if NOT %ERRORLEVEL% == 0 goto :EOF
 call thirdparty\glslcc\.build\src\Debug\glslcc.exe -r -l hlsl --cvar=wire -o ./src/3d/debug/shaders/wire.odin --vert=./src/3d/debug/wire.vert --frag=./src/3d/debug/wire.frag
 if NOT %ERRORLEVEL% == 0 goto :EOF
 :GFX_SHADERS_CONTINUE
-call odin build src/frag/app/app.odin -debug -out:frag.exe -collection:frag=src/frag -collection:imgui=src/imgui -collection:three_d=src/3d -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
+call odin build src/frag/app/app.odin -debug -opt:0 -out:frag.exe -collection:frag=src/frag -collection:imgui=src/imgui -collection:three_d=src/3d -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
 if NOT %ERRORLEVEL% == 0 goto :EOF
 if exist ".\src\imgui\shaders\imgui.odin" goto :IMGUI_SHADERS_CONTINUE
 :IMGUI_SHADERS_BUILD
 call thirdparty\glslcc\.build\src\Debug\glslcc.exe -r -l hlsl --cvar=imgui -o ./src/imgui/shaders/imgui.odin --vert=./src/imgui/imgui.vert --frag=./src/imgui/imgui.frag
 if NOT %ERRORLEVEL% == 0 goto :EOF
 :IMGUI_SHADERS_CONTINUE
-call odin build src/imgui/impl/imgui.odin -debug -build-mode:dll -out:imgui.dll -collection:frag=src/frag -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
+call odin build src/imgui/impl/imgui.odin -debug -opt:0 -build-mode:dll -out:imgui.dll -collection:frag=src/frag -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
 if NOT %ERRORLEVEL% == 0 goto :EOF
 @REM call odin build src/ecs/ecs.odin -debug -build-mode:dll -out:ecs.dll -collection:frag=src/frag -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
 @REM if NOT %ERRORLEVEL% == 0 goto :EOF
 @REM call odin build src/input/input.odin -debug -build-mode:dll -out:input.dll -collection:frag=src/frag -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
 @REM if NOT %ERRORLEVEL% == 0 goto :EOF
-call odin build src/3d/impl/3d.odin -debug -build-mode:dll -out:3d.dll -collection:frag=src/frag -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
+call odin build src/3d/impl/3d.odin -debug -opt:0 -build-mode:dll -out:3d.dll -collection:frag=src/frag -collection:linchpin=src/linchpin -collection:thirdparty=thirdparty
 if NOT %ERRORLEVEL% == 0 goto :EOF
 :FRAG_RUN
 frag.exe --run=%1 --asset-dir=%2

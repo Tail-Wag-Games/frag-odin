@@ -33,15 +33,17 @@ fetch_from :: proc(pool: ^Pool) -> rawptr {
   }
 }
 
-delete_from_pool :: proc(pool: ^Pool, ptr: rawptr) {
+delete_from :: proc(pool: ^Pool, ptr: rawptr) {
   uptr := uintptr(ptr)
   page := pool.pages
+  item_sz := pool.item_size
+  cap := pool.capacity
   
   for page != nil {
-    if uptr >= uintptr(page.buff[0]) &&
-       uptr < uintptr(page.buff[pool.capacity * pool.item_size]) {
-        assert(uintptr(mem.ptr_sub(cast(^u8)ptr, &page.buff[0])) % uintptr(pool.item_size) == 0, "pointer is not aligned to pool's items - probably invalid")
-        assert(page.iter != pool.capacity, "cannot delete any more objectgs, possible double delete")
+    if uptr >= uintptr(page.buff) &&
+       uptr < uintptr(mem.ptr_offset(&page.buff[0], uint(cap) * uint(item_sz))) {
+        assert(uintptr(mem.ptr_sub(cast(^u8)ptr, &page.buff[0])) % uintptr(item_sz) == 0, "pointer is not aligned to pool's items - probably invalid")
+        assert(page.iter != cap, "cannot delete any more objectgs, possible double delete")
 
         page.ptrs[page.iter] = ptr
         page.iter += 1

@@ -67,6 +67,7 @@ Job_Thread_Data :: struct {
   selector_fiber: fcontext.FContext,
   thread_index: int,
   tid: int,
+  tags: u32,
   main_thread: bool,
 }
 
@@ -107,7 +108,22 @@ DEFAULT_FIBER_STACK_SIZE :: 1048576    // 1MB
 tl_thread_data: ^Job_Thread_Data
 
 fiber_fn :: proc "c" (transfer: fcontext.FContext_Transfer) {
+  job := cast(^Job)transfer.data
+  ctx := job.ctx
 
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
+  assert(tl_thread_data.current_job == job)
+
+  job.selector_fiber = transfer.ctx
+  tl_thread_data.selector_fiber = transfer.ctx
+  tl_thread_data.current_job = job
+
+  job.callback(i32(job.range_start), i32(job.range_end), i32(tl_thread_data.thread_index), job.user_data)
+  job.done = true
+
+  fcontext.jump_fcontext(transfer.ctx, transfer.data)
 }
 
 new_job :: proc(ctx: ^Job_Context, index: int, callback: Job_Callback, user: rawptr, range_start: int, range_end: int, counter: Job_Handle, tags: u32, priority: Job_Priority) -> ^Job {
@@ -133,6 +149,7 @@ new_job :: proc(ctx: ^Job_Context, index: int, callback: Job_Callback, user: raw
     j.prev = nil
     j.next = j.prev
   }
+  fmt.println(j)
   return j
 }
 
@@ -147,11 +164,24 @@ add_job_to_list :: proc(pfirst: ^^Job, plast: ^^Job, node: ^Job) {
   }
 }
 
-delete_job :: proc(ctx: ^Job_Context, job: ^Job) {
-  lockless.lock_enter(&ctx.job_lock)
-  defer lockless.lock_exit(&ctx.job_lock)
+process_pending :: proc(ctx: ^Job_Context) {
+  for pending, i in &ctx.pending {
+    fmt.println(i32(lockless.atomic_load32_explicit(transmute(^u32)pending.counter, .Acquire)))
+    if !pool.is_full_n(ctx.job_pool, i32(lockless.atomic_load32_explicit(transmute(^u32)pending.counter, .Acquire))) {
+      range_start := 0
+      range_end := pending.range_size + (pending.range_remainder > 0 ? 1 : 0)
+      pending.range_remainder -= 1
 
-  pool.delete_from_pool(ctx.job_pool, job)
+      ordered_remove(&ctx.pending, i)
+
+      count := pending.counter^
+      for k in 0 ..< count {
+        add_job_to_list(&ctx.waiting_list[pending.priority], &ctx.waiting_list_last[pending.priority],
+                        new_job(ctx, int(k), pending.callback, pending.user, range_start, range_end,
+                        pending.counter, pending.tags, pending.priority))
+      }
+    }
+  }
 }
 
 remove_job_from_list :: proc(pfirst: ^^Job, plast: ^^Job, node: ^Job) {
@@ -171,6 +201,26 @@ remove_job_from_list :: proc(pfirst: ^^Job, plast: ^^Job, node: ^Job) {
   node.prev = node.next
 }
 
+delete_job :: proc(ctx: ^Job_Context, job: ^Job) {
+  lockless.lock_enter(&ctx.job_lock)
+  pool.delete_from(ctx.job_pool, job)
+  lockless.lock_exit(&ctx.job_lock)
+}
+
+test_and_del_job :: proc(ctx: ^Job_Context, job: Job_Handle) -> bool {
+  if lockless.atomic_load32_explicit(transmute(^u32)job, .Acquire) == 0 {
+    lockless.lock_enter(&ctx.counter_lock)
+    pool.delete_from(ctx.counter_pool, cast(rawptr)job)
+    lockless.lock_exit(&ctx.counter_lock)
+
+    lockless.lock_enter(&ctx.job_lock)
+    process_pending(ctx)
+    lockless.lock_exit(&ctx.counter_lock)
+    return true
+  }
+  return false
+}
+
 select_job :: proc(ctx: ^Job_Context, tid: int) -> (res: Selected_Job) {
   res = Selected_Job{}
 
@@ -181,7 +231,7 @@ select_job :: proc(ctx: ^Job_Context, tid: int) -> (res: Selected_Job) {
     node := ctx.waiting_list[priority]
     for node != nil {
       res.waiting_list_alive = true
-      if node^.wait_counter == Job_Handle(uintptr(0)) {
+      if node.wait_counter^ == 0 {
         if node.owner_tid == 0 || node.owner_tid == tid {
           res.job = node
           remove_job_from_list(&ctx.waiting_list[priority], &ctx.waiting_list_last[priority], node)
@@ -263,7 +313,7 @@ dispatch :: proc(ctx: ^Job_Context, count: i32, callback: Job_Callback, user: ra
     return nil
   }
 
-  lockless.atomic_store32_explicit(transmute(^lockless.Atomic_Ptr)counter, u32(num_jobs), .Release)
+  lockless.atomic_store32_explicit(transmute(^u32)counter, u32(num_jobs), .Release)
   assert(tl_thread_data != nil, "dispatch must be called from the main thread or another job worker thread")
 
   if tl_thread_data.current_job != nil {
@@ -312,6 +362,7 @@ main_thread_job_selector :: proc "c" (transfer: fcontext.FContext_Transfer) {
 
   assert(tl_thread_data != nil)
 
+
   j := select_job(ctx, tl_thread_data.tid)
 
   if j.job != nil {
@@ -342,12 +393,15 @@ destroy_job_tdata :: proc(tdata: ^Job_Thread_Data) {
 
 create_job_tdata :: proc(tid: int, index: int, main_thread: bool) -> (res: ^Job_Thread_Data, err: error.Error) {
   res = new(Job_Thread_Data) or_return
+  mem.zero(res, size_of(Job_Thread_Data))
 
   res.thread_index = index
   res.tid = tid
+  res.tags = 0xffffffff
   res.main_thread = main_thread
 
   res.selector_stack = fcontext.create_fcontext_stack(platform.MIN_STACK_SIZE)
+  assert(res != nil)
 
   return res, nil
 }

@@ -336,7 +336,7 @@ Asset_Meta_Key_Val :: struct {
 
 Asset_Load_Params :: struct {
 	path: cstring,
-	params: any,
+	params: rawptr,
 	tags: u32,
 	flags: Asset_Load_Flags,
 	num_meta: u32,
@@ -350,11 +350,11 @@ Asset_Load_Data :: struct {
 }
 
 Asset_Callbacks :: struct {
-	on_prepare: proc(params: ^Asset_Load_Params, mem: ^memio.Mem_Block) -> Asset_Load_Data,
-	on_load: proc(data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^memio.Mem_Block) -> bool,
-	on_finalize: proc(data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^memio.Mem_Block),
-	on_reload: proc(handle: Asset_Handle, prev_obj: Asset_Object),
-	on_release: proc (obj: Asset_Object),
+	on_prepare: proc "c" (params: ^Asset_Load_Params, mem: ^memio.Mem_Block) -> Asset_Load_Data,
+	on_load: proc "c" (data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^memio.Mem_Block) -> bool,
+	on_finalize: proc "c" (data: ^Asset_Load_Data, params: ^Asset_Load_Params, mem: ^memio.Mem_Block),
+	on_reload: proc "c" (handle: Asset_Handle, prev_obj: Asset_Object),
+	on_release: proc "c" (obj: Asset_Object),
 }
 
 Asset_Api :: struct {
@@ -385,6 +385,8 @@ Core_Api :: struct {
 	frame_index: proc "c" () -> i64,
 	
 	dispatch_job : proc "c" (count: i32, callback: proc "c" (start, end, thread_idx: i32, user: rawptr), user: rawptr, priority: job.Job_Priority = .Normal, tags: u32 = u32(0)) -> job.Job_Handle,
+	test_and_del_job : proc "c" (j: job.Job_Handle) -> bool,
+
 	job_thread_index: proc "c" () -> i32,
 	num_job_threads: proc "c" () -> i32,
 }
@@ -580,6 +582,7 @@ Gfx_Api :: struct {
 	destroy_pipeline: proc "c" (pip: sokol.sg_pipeline),
 	destroy_pass : proc "c" (pass: sokol.sg_pass),
 	destroy_image: proc "c" (img: sokol.sg_image),
+	init_image : proc "c" (img: sokol.sg_image, desc: ^sokol.sg_image_desc),
 	make_shader_with_data: proc "c" (vs_data_size: u32, vs_data: [^]u32, vs_refl_size: u32, vs_refl_json: [^]u32, fs_data_size: u32, fs_data: [^]u32, fs_ref_size: u32, fs_ref_json: [^]u32) -> Shader,
 	register_stage: proc "c" (name: string, parent_stage: Stage_Handle) -> Stage_Handle,
 	bind_shader_to_pipeline: proc "c" (shd: ^Shader, desc: ^sokol.sg_pipeline_desc, layout: ^Vertex_Layout) -> ^sokol.sg_pipeline_desc,

@@ -222,13 +222,25 @@ resolve_path :: proc(path: string, flags: api.Vfs_Flags) -> (res: string, err: e
 }
 
 
-read :: proc(path: string, flags: api.Vfs_Flags) -> (res: ^memio.Mem_Block, err: error.Error = nil) {
+read_file :: proc(path: string, flags: api.Vfs_Flags) -> (res: ^memio.Mem_Block, err: error.Error = nil) {
   resolved_path := resolve_path(path, flags) or_return
   if bool(flags & api.VFS_FLAG_TEXT_FILE) {
     return load_text_file(resolved_path) or_return, nil
    } else {
      return load_binary_file(resolved_path) or_return, nil
    } 
+}
+
+read :: proc "c" (path: cstring, flags: api.Vfs_Flags) -> ^memio.Mem_Block {
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
+  res, err := read_file(strings.clone_from_cstring(path, context.temp_allocator), flags)
+  if err != nil {
+    return nil
+  }
+
+  return res
 }
 
 read_async :: proc "c" (path: cstring, flags: api.Vfs_Flags, read_fn: api.Async_Read_Callback, user: rawptr) {
@@ -257,7 +269,7 @@ worker_thread_fn :: proc(_: ^thread.Thread) {
       switch req.cmd {
         case .Read:
           res.read_fn = req.read_fn
-          mem, err := read(req.path, req.flags); if err == nil {
+          mem, err := read_file(req.path, req.flags); if err == nil {
             res.code = .Read_Ok
             res.read_mem = mem
           } else {
@@ -339,5 +351,6 @@ init_vfs_api :: proc() {
     mount = mount,
     register_modify_cb = register_modify_cb,
     read_async = read_async,
+    read = read,
   }
 }

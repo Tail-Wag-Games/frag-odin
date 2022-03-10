@@ -83,6 +83,14 @@ dispatch_job :: proc "c" (count: i32, callback: proc "c" (start, end, thread_idx
   return job.dispatch(ctx.job_ctx, count, callback, user, priority, tags)
 }
 
+test_and_del_job :: proc "c" (j: job.Job_Handle) -> bool {
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
+  assert(ctx.job_ctx != nil)
+  return job.test_and_del_job(ctx.job_ctx, j)
+}
+
 frame :: proc() {
   if ctx.paused {
     return
@@ -104,6 +112,7 @@ frame :: proc() {
   }
 
   vfs.update()
+  asset.update()
   gfx.update()
 
   plugin.update(dt)
@@ -170,6 +179,7 @@ init_core_api :: proc() {
     frame_index = frame_index,
     
     dispatch_job = dispatch_job,
+    test_and_del_job = test_and_del_job,
     job_thread_index = job_thread_index,
     num_job_threads = num_job_threads,
   }

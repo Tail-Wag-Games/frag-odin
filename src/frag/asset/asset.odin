@@ -94,6 +94,8 @@ Asset_Context :: struct {
   resource_tbl: map[u32]int,
   resources: [dynamic]Asset_Resource,
   async_reqs: [dynamic]Async_Asset_Load_Req,
+  async_job_list: ^Async_Asset_Job,
+  async_job_list_last: ^Async_Asset_Job,
   assets_lock: lockless.Spinlock,
 }
 
@@ -110,20 +112,50 @@ find_async_req :: proc(path: string) -> int {
   return -1
 }
 
-on_asset_modified :: proc "c" (path: cstring) {
-  context = runtime.default_context()
-  context.allocator = ctx.alloc
+add_asset_job :: proc(pfirst: ^^Async_Asset_Job, plast: ^^Async_Asset_Job, node: ^Async_Asset_Job) {
+  if plast^ != nil {
+    (plast^).next = node
+    node.prev = plast^
+  }
+  plast^ = node
+  if pfirst^ == nil {
+    pfirst^ = node
+  }
+}
 
-  unix_path := slashpath.clean(strings.clone_from_cstring(path, context.temp_allocator))
+remove_asset_job :: proc(pfirst: ^^Async_Asset_Job, plast: ^^Async_Asset_Job, node: ^Async_Asset_Job) {
+  if node.prev != nil {
+    node.prev.next = node.next
+  }
+  if node.next != nil {
+    node.next.prev = node.prev
+  }
+  if pfirst^ == node {
+    pfirst^ = node.next
+  }
+  if plast^ == node {
+    plast^ = node.prev
+  }
+  node.next = nil
+  node.prev = node.next
 }
 
 asset_load_job_cb :: proc "c" (start, end, thread_idx: i32, user: rawptr) {
   context = runtime.default_context()
   context.allocator = ctx.alloc
 
+  fmt.println("in asset load job callback")
+
   ajob := cast(^Async_Asset_Job)user
 
   ajob.state = ajob.mgr.callbacks.on_load(&ajob.load_data, &ajob.load_params, ajob.mem_block) ? .Success : .Failed
+}
+
+on_asset_modified :: proc "c" (path: cstring) {
+  context = runtime.default_context()
+  context.allocator = ctx.alloc
+
+  unix_path := slashpath.clean(strings.clone_from_cstring(path, context.temp_allocator))
 }
 
 on_asset_read :: proc "c" (path: cstring, mb: ^memio.Mem_Block, user: rawptr) {
@@ -224,6 +256,7 @@ on_asset_read :: proc "c" (path: cstring, mb: ^memio.Mem_Block, user: rawptr) {
   }
 
   ajob.job = private.core_api.dispatch_job(1, asset_load_job_cb, ajob, .High, 0)
+  add_asset_job(&ctx.async_job_list, &ctx.async_job_list_last, ajob)
 
 
   // a = &ctx.assets[handle.index_handle(asset.id)]
@@ -491,6 +524,34 @@ load_hashed :: proc(name_hash: u32, path: string, params: rawptr, flags: api.Ass
       }
 
       success := false
+      // metas : []api.Asset_Meta_Key_Val
+      // fixed_path := check_and_fix_asset_type(mb, spath, &params.num_meta)
+      // is_path_fixed := bool(len(fixed_path))
+      // if is_path_fixed {
+      //   params.path = strings.clone_to_cstring(fixed_path, context.temp_allocator)
+      //   if params.num_meta > 0 {
+      //     assert(params.num_meta < 64)
+      //     metas = make([]api.Asset_Meta_Key_Val, params.num_meta)
+      //     mem.copy(&metas[0], mb.data, int(size_of(api.Asset_Meta_Key_Val) * params.num_meta))
+      //     params.metas = transmute([^]api.Asset_Meta_Key_Val)&metas[0]
+      //   }
+      // }
+
+      load_data := mgr.callbacks.on_prepare(&params, mb)
+
+      asset_ref := &ctx.assets[handle.index_handle(asset.id)]
+      if load_data.obj.id != 0 {
+        if mgr.callbacks.on_load(&load_data, &params, mb) {
+          mgr.callbacks.on_finalize(&load_data, &params, mb)
+          success = true
+        }
+      }
+
+      memio.destroy_block(mb)
+      if success {
+        asset_ref.state = .Ok
+        asset_ref.obj = load_data.obj
+      }
       
     }
   }
@@ -508,6 +569,42 @@ load :: proc "c" (name: cstring, path: cstring, params: rawptr, flags: api.Asset
   return asset
 }
 
+update :: proc() {
+  ajob := ctx.async_job_list
+  for ajob != nil {
+    fmt.println(ajob)
+    next := ajob.next
+    if private.core_api.test_and_del_job(ajob.job) {
+      a := &ctx.assets[handle.index_handle(ajob.asset.id)]
+      assert(bool(a.resource_id))
+      res := &ctx.resources[api.to_index(a.resource_id)]
+
+      #partial switch ajob.state {
+        case .Success:
+          ajob.mgr.callbacks.on_finalize(&ajob.load_data, &ajob.load_params, ajob.mem_block)
+          a.obj = ajob.load_data.obj
+          a.state = .Ok
+        case .Failed: {
+          fmt.println("failed loading asset!")
+          a.obj = ajob.mgr.failed_obj
+          a.state = .Failed
+
+          if bool(ajob.load_data.obj.id) {
+            ajob.mgr.callbacks.on_release(ajob.load_data.obj)
+          }
+        }
+      }
+
+      assert(!bool(ajob.load_params.flags & api.ASSET_LOAD_FLAG_RELOAD))
+      memio.destroy_block(ajob.mem_block)
+
+      remove_asset_job(&ctx.async_job_list, &ctx.async_job_list_last, ajob)
+      free(ajob)
+    }
+
+    ajob = next
+  }
+}
 
 init :: proc(allocator := context.allocator) {
   ctx.alloc = allocator

@@ -29,7 +29,7 @@ Texture_Manager :: struct {
   default_min_filter: sokol.sg_filter,
   default_mag_filter: sokol.sg_filter,
   default_aniso: int,
-  default_first_mip: int,
+  default_first_mip: i32,
 }
 
 Command :: enum {
@@ -1172,7 +1172,11 @@ mipcnt :: proc(x, y, z: i32) -> i32 {
   return big.ilog2(max(max(x,y), z))
 }
 
-on_prepare_texture :: proc (params: ^api.Asset_Load_Params, mb: ^memio.Mem_Block) -> api.Asset_Load_Data {
+on_prepare_texture :: proc "c" (params: ^api.Asset_Load_Params, mb: ^memio.Mem_Block) -> api.Asset_Load_Data {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  fmt.println("in on_prepare_texture")
   res := new(api.Texture)
 
   info := &res.info
@@ -1186,27 +1190,9 @@ on_prepare_texture :: proc (params: ^api.Asset_Load_Params, mb: ^memio.Mem_Block
 
     is_16_bit := bool(stbi.is_16_bit_from_memory(transmute([^]u8)mb.data, i32(mb.size)))
     mipcnt := is_16_bit ? mipcnt(info.width, info.height, 1) : 1
-    // if is_16_bit {
-    //   w := info.width
-    //   h := info.height
-    //   texels := transmute([^]u16)mb.data
-    //   mipcnt := mipcnt(w, h, 1)
-    //   tex := make([]u16, w * h * 2)
-
-    //   for y in 0 ..< h {
-    //     for x in 0 ..< w {
-    //       z := texels[i + w * j]
-    //       zf := f32(z) / f32((1 << 16) - 1)
-    //       z2 := zf * zf ((1 << 16) - 1)
-
-    //       tex[2 * (i + w * j)] = z
-    //       tex[1 + 2 * (i + w * j)] = z2
-    //     }
-    //   }
-    // }
 
     info.image_type = .SG_IMAGETYPE_2D
-    info.format = is_16_bit ? .SG_PIXELFORMAT_RG16 : .SG_PIXELFORMAT_RGBA8
+    info.format = is_16_bit ? .SG_PIXELFORMAT_R16 : .SG_PIXELFORMAT_RGBA8
     info.size_in_bytes = is_16_bit ? 2 * info.width * info.height : 4 * info.width * info.height
     info.layers = 1
     info.mips = mipcnt
@@ -1225,47 +1211,175 @@ on_prepare_texture :: proc (params: ^api.Asset_Load_Params, mb: ^memio.Mem_Block
 } 
 
 
-on_load_texture :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) -> bool {
+on_load_texture :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) -> bool {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  tparams := cast(^api.Texture_Load_Params)params.params
+  tex := cast(^api.Texture)data.obj.ptr
+  desc := cast(^sokol.sg_image_desc)data.user1
+
+  first_mip := tparams.first_mip != 0 ? tparams.first_mip : ctx.tex_mgr.default_first_mip
+  if first_mip >= tex.info.mips {
+    first_mip = tex.info.mips - 1
+  }
+  num_mips := tex.info.mips - first_mip
+
+  tw := tex.info.width
+  th := tex.info.height
+
+  for i in 0..< first_mip {
+    tw >>= 1
+    th >>= 1
+  }
+
+  tex.info.mips = num_mips
+  tex.info.width = tw
+  tex.info.height = th
+
+  assert(desc != nil)
+  desc^ = {
+    type = tex.info.image_type,
+    width = tex.info.width,
+    height = tex.info.height,
+    num_slices = tex.info.layers,
+    num_mipmaps = num_mips,
+    pixel_format = tex.info.format,
+    min_filter = tparams.min_filter != sokol.sg_filter(0) ? tparams.min_filter : ctx.tex_mgr.default_min_filter,
+    mag_filter = tparams.mag_filter != sokol.sg_filter(0) ? tparams.mag_filter : ctx.tex_mgr.default_mag_filter,
+    wrap_u = tparams.wrap_u,
+    wrap_v = tparams.wrap_v,
+    wrap_w = tparams.wrap_w,
+    max_anisotropy = tparams.aniso != 0 ? u32(tparams.aniso) : u32(ctx.tex_mgr.default_aniso),
+  }
+
+  
+
+  w, h, cmp: i32
+  if tex.info.bpp == 16 {
+    texels := stbi.load_16_from_memory(transmute([^]u8)mem.data, i32(mem.size), &w, &h, &cmp, 1)
+    if texels != nil {
+      total_size := uint(w * h * 2)
+      tw := w
+      th := h
+      for i in 1 ..< sokol.SG_MAX_MIPMAPS {
+        tw /= 2
+        th /= 2
+
+        if tw < 1 && th < 1 {
+          break
+        }
+
+        total_size += uint(tw * th * 2)
+      }
+
+      tex_data := make([]u16, total_size)
+
+      tw = w
+      th = h
+      for i in 1 ..< sokol.SG_MAX_MIPMAPS {
+        tw /= 2
+        th /= 2
+
+        if tw < 1 && th < 1 {
+          break
+        }
+
+        mip_lvl_sz := uint(tw * th * 2)
+        desc.data.subimage[0][i].ptr = &tex_data[(tw * th * 2)]
+        desc.data.subimage[0][i].size = mip_lvl_sz
+      }
+
+      for j in 0 ..< h {
+        for i in 0 ..< w {
+          z := texels[i + w * j]
+          zf := f32(z) / f32((1 << 16) - 1)
+          z2 := cast(u16)(zf * zf * ((1 << 16) - 1))
+
+          tex_data[2 * (i + w * j)] = z
+          tex_data[1 + 2 * (i + w * j)] = z2
+        }
+      }
+      
+      stbi.image_free(cast(rawptr)texels)
+
+      desc.data.subimage[0][0].ptr = &tex_data[0]
+      desc.data.subimage[0][0].size = uint(w * h * 2)
+    }
+  } else {
+    texels := stbi.load_from_memory(transmute([^]u8)mem.data, i32(mem.size), &w, &h, &cmp, 4)
+    if texels != nil {
+      desc.data.subimage[0][0].ptr = texels
+      desc.data.subimage[0][0].size = uint(w * h * 4)
+    }
+  }
+
+  fmt.println("finished loading texture!")
+
   return true
 }
 
 
-on_finalize_texture :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
-
-}
-
-
-on_reload_texture :: proc (handle: api.Asset_Handle, prev_obj: api.Asset_Object) {
-
-}
-
-
-on_release_texture :: proc (obj: api.Asset_Object) {
+on_finalize_texture :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
   
+  fmt.println("finalizing texture!!!")
+
+  tex := cast(^api.Texture)data.obj.ptr
+  desc := cast(^sokol.sg_image_desc)data.user1
+  assert(desc != nil)
+
+  private.gfx_api.init_image(tex.img, desc)
+  assert(desc.data.subimage[0][0].ptr != nil)
+  
+  free(cast(rawptr)desc.data.subimage[0][0].ptr)
+  free(data.user1)
+
+  fmt.println("Initialized image!!!!!!")
 }
 
-on_prepare_shader :: proc (params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) -> api.Asset_Load_Data {
+
+on_reload_texture :: proc "c" (handle: api.Asset_Handle, prev_obj: api.Asset_Object) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  fmt.println("in on_reload_texture")
+}
+
+
+on_release_texture :: proc "c" (obj: api.Asset_Object) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  fmt.println("in on_release_texture")
+}
+
+on_prepare_shader :: proc "c" (params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) -> api.Asset_Load_Data {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+  
   fmt.println("Inside on prepare shader!")
   return {}
 }
 
 
-on_load_shader :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) -> bool {
+on_load_shader :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) -> bool {
   return true
 }
 
 
-on_finalize_shader :: proc (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
+on_finalize_shader :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
 
 }
 
 
-on_reload_shader :: proc (handle: api.Asset_Handle, prev_obj: api.Asset_Object) {
+on_reload_shader :: proc "c" (handle: api.Asset_Handle, prev_obj: api.Asset_Object) {
 
 }
 
 
-on_release_shader :: proc (obj: api.Asset_Object) {
+on_release_shader :: proc "c" (obj: api.Asset_Object) {
 
 }
 
@@ -1554,6 +1668,7 @@ init_gfx_api :: proc() {
     destroy_pipeline = destroy_pipeline,
     destroy_pass = destroy_pass,
     destroy_image = destroy_image,
+    init_image = sokol.sg_init_image,
     make_shader_with_data = make_shader_with_data,
     register_stage = register_stage,
     bind_shader_to_pipeline = bind_shader_to_pipeline,

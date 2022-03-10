@@ -82,12 +82,12 @@ create :: proc(item_size: int, capacity: int) -> (^Queue, error.Error) {
 }
 
 consume :: proc(queue: ^Queue, data: rawptr) -> bool {
-  if queue.divider != lockless.atomic_loadptr_explicit(&queue.last, lockless.Atomic_Memory_Order.Acquire) {
+  if u64(queue.divider) != lockless.atomic_loadptr_explicit(transmute(^u64)&queue.last, lockless.Atomic_Memory_Order.Acquire) {
     divider := cast(^Node)uintptr(queue.divider)
     assert(divider.next != nil)
     runtime.mem_copy(data, mem.ptr_offset(divider.next, 1), queue.stride)
 
-    lockless.atomic_storeptr_explicit(&queue.divider, u64(uintptr(divider.next)), lockless.Atomic_Memory_Order.Release)
+    lockless.atomic_storeptr_explicit(transmute(^u64)&queue.divider, u64(uintptr(divider.next)), lockless.Atomic_Memory_Order.Release)
     return true
   }
 
@@ -116,10 +116,10 @@ produce :: proc(queue: ^Queue, data: rawptr) -> bool {
     mem.copy(mem.ptr_offset(node, 1), data, queue.stride)
     node.next = nil
 
-    last := cast(^Node)uintptr(lockless.atomic_exchange64(&queue.last, u64(uintptr(node))))
+    last := cast(^Node)uintptr(lockless.atomic_exchange64(transmute(^u64)&queue.last, u64(uintptr(node))))
     last.next = node
 
-    for lockless.Atomic_Ptr(uintptr(queue.first)) != lockless.atomic_load64_explicit(&queue.divider, .Acquire) {
+    for u64(uintptr(queue.first)) != lockless.atomic_load64_explicit(transmute(^u64)&queue.divider, .Acquire) {
       first := cast(^Node)queue.first
       queue.first = first.next
 
