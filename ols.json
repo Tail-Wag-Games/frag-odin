@@ -1,0 +1,20 @@
+{
+  "collections": [{ "name": "core", "path": "H:/Projects/Odin/core" },
+                  { "name": "vendor", "path": "H:/Projects/Odin/vendor" },
+                  { "name": "frag", "path": "H:/Projects/frag/src/frag" },
+                  { "name": "linchpin", "path": "H:/Projects/frag/src/linchpin" },
+                  { "name": "imgui", "path": "H:/Projects/frag/src/imgui" },
+                  { "name": "3d", "path": "H:/Projects/frag/src/3d"},
+                  { "name": "thirdparty", "path": "H:/Projects/frag/thirdparty"},
+                  { "name": "shell_shocked", "path": "H:/Projects/shell-shocked"}
+                ],
+  "thread_pool_count": 4,
+  "enable_semantic_tokens": false,
+  "enable_document_symbols": true,
+  "enable_hover": true,
+  "enable_format": true,
+  "formatter": {
+  	"tabs": true,
+	"characters": 90
+  }
+}

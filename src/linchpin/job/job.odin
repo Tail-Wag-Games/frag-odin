@@ -92,7 +92,7 @@ Job_Context :: struct {
   job_lock: lockless.Spinlock,
   counter_lock: lockless.Spinlock,
   dummy_counter: lockless.atomic_u32,
-  sem: sync.Semaphore,
+  sem: sync.Sema,
   quit: bool,
   thread_init_cb: Job_Thread_Init_Callback,
   thread_shutdown_cb: Job_Thread_Shutdown_Callback,
@@ -255,7 +255,7 @@ job_selector_fn :: proc "c" (transfer: fcontext.FContext_Transfer) {
   assert(tl_thread_data != nil)
 
   for !ctx.quit {
-    sync.semaphore_wait_for(&ctx.sem)
+    sync.sema_wait(&ctx.sem)
 
     j := select_job(ctx, tl_thread_data.tid)
 
@@ -275,7 +275,7 @@ job_selector_fn :: proc "c" (transfer: fcontext.FContext_Transfer) {
         delete_job(ctx, j.job)
       }
     } else if j.waiting_list_alive {
-      sync.semaphore_post(&ctx.sem, 1)
+      sync.sema_post(&ctx.sem, 1)
       lockless.relax_cpu()
     }
   }
@@ -336,7 +336,7 @@ dispatch :: proc(ctx: ^Job_Context, count: i32, callback: Job_Callback, user: ra
     }
     assert(range_remainder <= 0)
 
-    sync.semaphore_post(&ctx.sem, num_jobs)
+    sync.sema_post(&ctx.sem, num_jobs)
   } else {
     pending := Pending_Job {
       counter = counter,
@@ -439,8 +439,6 @@ create_job_context :: proc(desc: ^Job_Context_Desc, alloc := context.allocator) 
   res.thread_user_data = desc.thread_user_data
   max_fibers := desc.max_fibers > 0 ? desc.max_fibers : DEFAULT_MAX_FIBERS
 
-  sync.semaphore_init(&res.sem)
-
   if tl_thread_data, err = create_job_tdata(sync.current_thread_id(), 0, true); err != nil {
     free(res)
     return {}, err
@@ -466,7 +464,7 @@ destroy_job_context :: proc(ctx: ^Job_Context) {
   assert(ctx != nil)
   
   ctx.quit = true
-  sync.semaphore_post(&ctx.sem, len(ctx.threads) + 1)
+  sync.sema_post(&ctx.sem, len(ctx.threads) + 1)
 
   for t in ctx.threads {
     thread.destroy(t)
@@ -477,7 +475,6 @@ destroy_job_context :: proc(ctx: ^Job_Context) {
 
   pool.destroy_pool(ctx.job_pool)
   pool.destroy_pool(ctx.counter_pool)
-  sync.semaphore_destroy(&ctx.sem)
 
   free(ctx)
 }

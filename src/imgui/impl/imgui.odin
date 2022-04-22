@@ -173,8 +173,8 @@ draw :: proc(data: ^cimgui.Draw_Data) {
     num_verts += int(dl_num_verts)
   }
 
-  gfx_api.imm.update_buffer(ctx.bind.vertex_buffers[0], &sokol.sg_range {raw_data(verts), uint(num_verts * size_of(cimgui.Draw_Vert)) })
-  gfx_api.imm.update_buffer(ctx.bind.index_buffer, &sokol.sg_range { raw_data(indices), uint(num_indices * size_of(u16)) })
+  gfx_api.imm.update_buffer(ctx.bind.vertex_buffers[0], raw_data(verts), i32(num_verts * size_of(cimgui.Draw_Vert)))
+  gfx_api.imm.update_buffer(ctx.bind.index_buffer, raw_data(indices), i32(num_indices * size_of(u16)))
 
   io := imgui_api.GetIO()
   fb_scale := data.framebuffer_scale

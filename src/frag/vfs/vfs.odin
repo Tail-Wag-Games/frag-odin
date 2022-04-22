@@ -76,7 +76,7 @@ Context :: struct {
   worker_thread: ^thread.Thread,
   req_queue: ^spsc.Queue,
   res_queue: ^spsc.Queue,
-  worker_sem: sync.Semaphore,
+  worker_sem: sync.Sema,
   quit: bool,
   dmon_queue: ^spsc.Queue,
 }
@@ -255,7 +255,7 @@ read_async :: proc "c" (path: cstring, flags: api.Vfs_Flags, read_fn: api.Async_
   }
   req.rw_cb.read_fn = read_fn
   spsc.produce_and_grow(ctx.req_queue, &req)
-  sync.semaphore_post(&ctx.worker_sem, 1)
+  sync.sema_post(&ctx.worker_sem, 1)
 }
 
 worker_thread_fn :: proc(_: ^thread.Thread) {
@@ -280,7 +280,7 @@ worker_thread_fn :: proc(_: ^thread.Thread) {
           res.write_fn = req.write_fn
       }
     }
-    sync.semaphore_wait_for(&ctx.worker_sem)
+    sync.sema_wait(&ctx.worker_sem)
   }
 }
 
@@ -313,7 +313,6 @@ init :: proc(alloc := context.allocator) -> (err: error.Error = nil) {
   ctx.req_queue = spsc.create(size_of(Async_Request), 128) or_return
   ctx.res_queue = spsc.create(size_of(Async_Response), 128) or_return
 
-  sync.semaphore_init(&ctx.worker_sem)
   ctx.worker_thread = thread.create_and_start(worker_thread_fn)
 
   dmon.init()
@@ -326,9 +325,8 @@ init :: proc(alloc := context.allocator) -> (err: error.Error = nil) {
 shutdown :: proc() {
   if ctx.worker_thread != nil {
     ctx.quit = true
-    sync.semaphore_post(&ctx.worker_sem)
+    sync.sema_post(&ctx.worker_sem)
     thread.destroy(ctx.worker_thread)
-    sync.semaphore_destroy(&ctx.worker_sem)
   }
   
   if ctx.req_queue != nil {

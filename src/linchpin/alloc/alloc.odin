@@ -1,4 +1,4 @@
-package linchpin
+package allocutils
 
 import "core:runtime"
 import "core:intrinsics"

@@ -564,7 +564,7 @@ Draw_Api :: struct {
 	apply_uniforms: proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, data: rawptr, num_bytes: i32),
 	draw: proc "c" (base_element: i32, num_elements: i32, num_instances: i32),
 	end_pass: proc "c" (),
-	update_buffer: proc "c" (buf: sokol.sg_buffer, data : ^sokol.sg_range),
+	update_buffer: proc "c" (buf: sokol.sg_buffer, data : rawptr, size: i32),
 	append_buffer: proc "c" (buf: sokol.sg_buffer, data : rawptr, size: i32) -> i32,
 	update_image: proc "c" (img: sokol.sg_image, data: ^sokol.sg_image_data),
 }
@@ -587,6 +587,7 @@ Gfx_Api :: struct {
 	register_stage: proc "c" (name: string, parent_stage: Stage_Handle) -> Stage_Handle,
 	bind_shader_to_pipeline: proc "c" (shd: ^Shader, desc: ^sokol.sg_pipeline_desc, layout: ^Vertex_Layout) -> ^sokol.sg_pipeline_desc,
 	alloc_image: proc "c" () -> sokol.sg_image,
+	alloc_shader : proc "c" () -> sokol.sg_shader,
 
 	texture_white: proc "c" () -> sokol.sg_image,
 	texture_black: proc "c" () -> sokol.sg_image,

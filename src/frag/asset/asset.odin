@@ -4,6 +4,7 @@ import "thirdparty:lockless"
 
 import "linchpin:handle"
 import "linchpin:job"
+import "linchpin:linchpin"
 import "linchpin:memio"
 
 import "frag:api"
@@ -20,11 +21,7 @@ import "core:path/slashpath"
 import "core:runtime"
 import "core:strings"
 
-make_four_cc :: proc(a, b, c, d: rune) -> u32 {
-  return ((u32(a) | (u32(b) << 8) | (u32(c) << 16) | (u32(d) << 24)))
-}
-
-ASSET_FLAG := make_four_cc('F', 'R', 'A', 'G')
+ASSET_FLAG := linchpin.make_four_cc('F', 'R', 'A', 'G')
 
 Asset_Job_State :: enum i32 {
   Spawn,
@@ -421,6 +418,7 @@ create_new_asset :: proc(path: string, params: rawptr, obj: api.Asset_Object, na
   } else {
     ctx.assets[idx] = asset
   }
+  lockless.lock_exit(&ctx.assets_lock)
 
   ctx.asset_tbl[asset.hash] = {hnd}
 

@@ -4,6 +4,7 @@ import "thirdparty:sokol"
 import "thirdparty:lockless"
 
 import "linchpin:alloc"
+import "linchpin:linchpin"
 import "linchpin:memio"
 
 import "frag:api"
@@ -11,10 +12,12 @@ import "frag:private"
 
 import stbi "vendor:stb/image"
 
+import "core:bytes"
 import _c "core:c"
 import "core:encoding/json"
 import "core:fmt"
 import "core:hash"
+import "core:io"
 import "core:math/big"
 import "core:mem"
 import "core:path/filepath"
@@ -113,6 +116,13 @@ Context :: struct {
   last_shader_error: bool,
 }
 
+Sgs_Chunk_Private_Data :: struct {
+  pos: i64,
+  size: u32,
+  fourcc: u32,
+  parent_id: i32,
+}
+
 Run_Command_Callback :: proc(buff: []u8, offset: int) -> ([]u8, int)
 
 STAGE_ORDER_DEPTH_BITS :: 6
@@ -134,7 +144,7 @@ run_command_cbs := [17]Run_Command_Callback {
   run_cb_draw,
   run_cb_begin_default_pass,
   run_cb_end_pass,
-  run_cb_begin_default_pass,
+  run_cb_update_buffer,
   run_cb_begin_default_pass,
   run_cb_append_buffer,
   run_cb_begin_default_pass,
@@ -179,6 +189,129 @@ texture_type_names := map[Texture_Type_Name]sokol.sg_image_type {
   {"2d", false} = .SG_IMAGETYPE_2D,
   {"3d", false} = .SG_IMAGETYPE_3D,
   {"3d", true} = .SG_IMAGETYPE_CUBE,
+}
+
+fourcc_to_shader_lang :: proc(fourcc: u32) -> api.Shader_Lang {
+  if fourcc == SGS_LANG_GLES {
+    return .GLES
+  } else if fourcc == SGS_LANG_HLSL {
+    return .HLSL
+  } else if fourcc == SGS_LANG_MSL {
+    return .MSL
+  } else if fourcc == SGS_LANG_GLSL {
+    return .GLSL
+  } else {
+    assert(false, "shouldn't be here")
+    return .GLSL
+  }
+}
+
+fourcc_to_vertex_format :: proc(fourcc: u32, semantic: cstring) -> sokol.sg_vertex_format {
+  if fourcc == SGS_VERTEXFORMAT_FLOAT {
+    return .SG_VERTEXFORMAT_FLOAT
+  } else if fourcc == SGS_VERTEXFORMAT_FLOAT2 {
+    return .SG_VERTEXFORMAT_FLOAT2
+  } else if fourcc == SGS_VERTEXFORMAT_FLOAT3 {
+    return .SG_VERTEXFORMAT_FLOAT3
+  } else if fourcc == SGS_VERTEXFORMAT_FLOAT4 && semantic == "COLOR" {
+    return .SG_VERTEXFORMAT_FLOAT4
+  } else if fourcc == SGS_VERTEXFORMAT_FLOAT4 {
+    return .SG_VERTEXFORMAT_FLOAT4
+  } else {
+    return .SG_VERTEXFORMAT_NUM
+  }
+}
+
+fourcc_to_image_type :: proc(fourcc: u32, array: bool) -> sokol.sg_image_type {
+  if fourcc == SGS_IMAGEDIM_2D {
+    return .SG_IMAGETYPE_ARRAY
+  } else if fourcc == SGS_IMAGEDIM_2D {
+    return .SG_IMAGETYPE_2D
+  } else if fourcc == SGS_IMAGEDIM_3D {
+    return .SG_IMAGETYPE_3D
+  } else if fourcc == SGS_IMAGEDIM_CUBE {
+    return .SG_IMAGETYPE_CUBE
+  } else {
+    return .SG_IMAGETYPE_DEFAULT
+  }
+}
+
+SGS_CHUNK := linchpin.make_four_cc('S', 'G', 'S', ' ')
+SGS_CHUNK_STAGE := linchpin.make_four_cc('S', 'T', 'A', 'G')
+SGS_CHUNK_REFL := linchpin.make_four_cc('R', 'E', 'F', 'L')
+SGS_CHUNK_CODE := linchpin.make_four_cc('C', 'O', 'D', 'E')
+SGS_CHUNK_DATA := linchpin.make_four_cc('D', 'A', 'T', 'A')
+
+SGS_LANG_GLES := linchpin.make_four_cc('G', 'L', 'E', 'S')
+SGS_LANG_HLSL := linchpin.make_four_cc('H', 'L', 'S', 'L')
+SGS_LANG_MSL := linchpin.make_four_cc('M', 'S', 'L', ' ')
+SGS_LANG_GLSL := linchpin.make_four_cc('G', 'L', 'S', 'L')
+
+SGS_VERTEXFORMAT_FLOAT := linchpin.make_four_cc('F', 'L', 'T', '1')
+SGS_VERTEXFORMAT_FLOAT2 := linchpin.make_four_cc('F', 'L', 'T', '2')
+SGS_VERTEXFORMAT_FLOAT3 := linchpin.make_four_cc('F', 'L', 'T', '3')
+SGS_VERTEXFORMAT_FLOAT4 := linchpin.make_four_cc('F', 'L', 'T', '4')
+SGS_VERTEXFORMAT_INT := linchpin.make_four_cc('I', 'N', 'T', '1')
+SGS_VERTEXFORMAT_INT2 := linchpin.make_four_cc('I', 'N', 'T', '2')
+SGS_VERTEXFORMAT_INT3 := linchpin.make_four_cc('I', 'N', 'T', '3')
+SGS_VERTEXFORMAT_INT4 := linchpin.make_four_cc('I', 'N', 'T', '4')
+
+SGS_STAGE_VERTEX := linchpin.make_four_cc('V', 'E', 'R', 'T')
+SGS_STAGE_FRAGMENT := linchpin.make_four_cc('F', 'R', 'A', 'G')
+SGS_STAGE_COMPUTE := linchpin.make_four_cc('C', 'O', 'M', 'P')
+
+SGS_IMAGEDIM_1D := linchpin.make_four_cc('1', 'D', ' ', ' ')
+SGS_IMAGEDIM_2D := linchpin.make_four_cc('2', 'D', ' ', ' ')
+SGS_IMAGEDIM_3D := linchpin.make_four_cc('3', 'D', ' ', ' ')
+SGS_IMAGEDIM_CUBE := linchpin.make_four_cc('C', 'U', 'B', 'E')
+SGS_IMAGEDIM_RECT := linchpin.make_four_cc('R', 'E', 'C', 'T')
+SGS_IMAGEDIM_BUFFER := linchpin.make_four_cc('B', 'U', 'F', 'F')
+SGS_IMAGEDIM_SUBPASS := linchpin.make_four_cc('S', 'U', 'B', 'P')
+
+Sgs_Chunk :: struct #align 1 {
+  lang : u32,
+  profile_ver : u32,
+}
+
+Sgs_Chunk_Reflection_Data :: struct #align 1 {
+  name : [32]u8,
+  num_inputs : u32,
+  num_textures: u32,
+  num_uniform_buffers : u32,
+  num_storage_images : u32,
+  num_storage_buffers : u32,
+  flatten_ubos : u16,
+  debug_info : u16,
+}
+
+Sgs_Input_Reflection_Data :: struct #align 1 {
+  name: [32]u8,
+  loc: i32,
+  semantic: [32]u8,
+  semantic_index: u32,
+  format: u32,
+}
+
+Sgs_Buffer_Reflection_Data :: struct #align 1 {
+  name : [32]u8,
+  binding: i32,
+  size_bytes: u32,
+  array_stride: u32,
+}
+
+Sgs_Uniform_Buffer_Reflection_Data :: struct #align 1 {
+  name: [32]u8,
+  binding: i32,
+  size_bytes: u32,
+  array_size: u16,
+}
+
+Sgs_Texture_Reflection_data :: struct #align 1 {
+  name : [32]u8,
+  binding : i32,
+  image_dim : u32,
+  multisample : u8,
+  is_array : u8,
 }
 
 sg_map_buffer :: proc(buf_id: sokol.sg_buffer, offset: i32, data: rawptr, num_bytes: i32) {
@@ -383,6 +516,50 @@ end_cb_pass :: proc "c" () {
 
   cb.cmd_idx += 1
 }
+
+update_cb_buffer :: proc "c" (buffer: sokol.sg_buffer, data: rawptr, data_size: i32) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
+
+  cb := &ctx.cmd_buffers_feed[private.core_api.job_thread_index()]
+
+  assert(cb.running_stage.id != 0, "draw related calls must be issued between `begin_stage` and `end_stage`")
+  assert(cb.cmd_idx < max(u16), "max number of graphics calls exceeded")
+
+  offset := 0
+  buff := make_cb_params_buff(cb, size_of(sokol.sg_buffer) + int(data_size) + size_of(i32), &offset)
+
+  ref := Command_Buffer_Ref {
+    key = (u32(cb.stage_order << 16) | u32(cb.cmd_idx)),
+    cmd_buffer_idx = cb.index,
+    cmd = .Update_Buffer,
+    params_offset = offset,
+  }
+  append(&cb.refs, ref)
+
+  cb.cmd_idx += 1
+
+  (cast(^sokol.sg_buffer)buff)^ = buffer
+  buff = mem.ptr_offset(buff, size_of(sokol.sg_buffer))
+  (cast(^i32)buff)^ = i32(data_size)
+  buff = mem.ptr_offset(buff, size_of(i32))
+  mem.copy(buff, data, int(data_size))
+ 
+  sokol.sg_buffer_set_used_frame(buffer.id, private.core_api.frame_index())
+}
+
+run_cb_update_buffer :: proc(buff: []u8, offset: int) -> ([]u8, int) {
+  cur_offset := offset
+
+  buf := (cast(^sokol.sg_buffer)&buff[cur_offset])^
+  cur_offset += size_of(sokol.sg_buffer)
+  data_size := (cast(^i32)&buff[cur_offset])^
+  cur_offset += size_of(i32)
+  sokol.sg_update_buffer(buf, &{ptr = &buff[cur_offset], size = uint(data_size)})
+  cur_offset += int(data_size)
+
+  return buff, cur_offset
+} 
 
 append_cb_buffer :: proc "c" (buffer: sokol.sg_buffer, data: rawptr, data_size: i32) -> i32 {
   context = runtime.default_context()
@@ -898,6 +1075,114 @@ make_pipeline :: proc "c" (desc: ^sokol.sg_pipeline_desc) -> sokol.sg_pipeline {
   return pipeline
 }
 
+parse_shader_reflection_binary :: proc(refl_data: rawptr, refl_size: u32) -> ^api.Shader_Reflection_Data {
+  byte_reader : bytes.Reader
+  bytes.reader_init(&byte_reader, mem.byte_slice(refl_data, int(refl_size)))
+  reader, _ := io.to_reader(bytes.reader_to_stream(&byte_reader))
+  
+  refl_chunk : Sgs_Chunk_Reflection_Data
+  io.read_ptr(reader, &refl_chunk, size_of(refl_chunk))
+
+  total_sz := int(size_of(api.Shader_Reflection_Data) +
+              size_of(api.Shader_Input_Reflection_Data) * refl_chunk.num_inputs +
+              size_of(api.Shader_Uniform_Buffer_Reflection_Data) * refl_chunk.num_uniform_buffers +
+              size_of(api.Shader_Texture_Reflection_Data) * refl_chunk.num_textures +
+              size_of(api.Shader_Texture_Reflection_Data) * refl_chunk.num_storage_images +
+              size_of(api.Shader_Buffer_Reflection_Data) * refl_chunk.num_storage_buffers)
+
+  refl := transmute(^api.Shader_Reflection_Data)mem.alloc(total_sz)
+  buff := cast(^u8)(mem.ptr_offset(refl, 1))
+
+  refl.source_file = strings.clone_from_cstring(cstring(&refl_chunk.name[0]), context.temp_allocator)
+
+  refl.flatten_ubos = refl_chunk.flatten_ubos != 0 ? true : false
+  
+  if refl_chunk.num_inputs > 0 {
+    size := int(size_of(api.Shader_Input_Reflection_Data) * refl_chunk.num_inputs)
+    refl.inputs = transmute([]api.Shader_Input_Reflection_Data)mem.slice_ptr(buff, size)
+    buff = mem.ptr_offset(buff, size)
+
+    for i in 0 ..< refl_chunk.num_inputs {
+      input : Sgs_Input_Reflection_Data
+      io.read_ptr(reader, &input, size_of(input))
+      refl.inputs[i] = {
+        semantic_index = int(input.semantic_index),
+        format = fourcc_to_vertex_format(input.format, cstring(&input.semantic[0])),
+      }
+      refl.inputs[i].name = strings.clone_from_cstring(cstring(&input.name[0]), context.temp_allocator)
+      refl.inputs[i].semantic = strings.clone_from_cstring(cstring(&input.semantic[0]), context.temp_allocator)
+    }
+  }
+
+  if refl_chunk.num_uniform_buffers > 0 {
+    size := int(size_of(api.Shader_Uniform_Buffer_Reflection_Data) * refl_chunk.num_uniform_buffers)
+    refl.uniform_buffers = transmute([]api.Shader_Uniform_Buffer_Reflection_Data)mem.slice_ptr(buff, size)
+    buff = mem.ptr_offset(buff, size)
+
+    for i in 0 ..< refl_chunk.num_uniform_buffers {
+      ub : Sgs_Uniform_Buffer_Reflection_Data
+      io.read_ptr(reader, &ub, size_of(ub))
+      refl.uniform_buffers[i] = {
+        size_in_bytes = int(ub.size_bytes),
+        binding = int(ub.binding),
+        array_size = int(ub.array_size),
+      }
+      refl.uniform_buffers[i].name = strings.clone_from_cstring(cstring(&ub.name[0]), context.temp_allocator)
+    }
+  }
+
+  if refl_chunk.num_textures > 0 {
+    size := int(size_of(api.Shader_Texture_Reflection_Data) * refl_chunk.num_textures)
+    refl.textures = transmute([]api.Shader_Texture_Reflection_Data)mem.slice_ptr(buff, size)
+    buff = mem.ptr_offset(buff, size)
+
+    for i in 0 ..< refl_chunk.num_textures {
+      tex : Sgs_Texture_Reflection_data
+      io.read_ptr(reader, &tex, size_of(tex))
+      refl.textures[i] = {
+        binding = int(tex.binding),
+        image_type = fourcc_to_image_type(tex.image_dim, bool(tex.is_array)),
+      }
+      refl.uniform_buffers[i].name = strings.clone_from_cstring(cstring(&tex.name[0]), context.temp_allocator)
+    }
+  }
+  
+  if refl_chunk.num_storage_images > 0 {
+    size := int(size_of(api.Shader_Texture_Reflection_Data) * refl_chunk.num_storage_images)
+    refl.storage_images = transmute([]api.Shader_Texture_Reflection_Data)mem.slice_ptr(buff, size)
+    buff = mem.ptr_offset(buff, size)
+
+    for i in 0 ..< refl_chunk.num_storage_images {
+      img : Sgs_Texture_Reflection_data
+      io.read_ptr(reader, &img, size_of(img))
+      refl.storage_images[i] = {
+        binding = int(img.binding),
+        image_type = fourcc_to_image_type(img.image_dim, bool(img.is_array)),
+      }
+      refl.uniform_buffers[i].name = strings.clone_from_cstring(cstring(&img.name[0]), context.temp_allocator)
+    }
+  }
+
+  if refl_chunk.num_storage_buffers > 0 {
+    size := int(size_of(api.Shader_Buffer_Reflection_Data) * refl_chunk.num_storage_buffers)
+    refl.storage_buffers = transmute([]api.Shader_Buffer_Reflection_Data)mem.slice_ptr(buff, size)
+    buff = mem.ptr_offset(buff, size)
+
+    for i in 0 ..< refl_chunk.num_storage_buffers {
+      sb : Sgs_Buffer_Reflection_Data
+      io.read_ptr(reader, &sb, size_of(sb))
+      refl.storage_buffers[i] = {
+        size_in_bytes = int(sb.size_bytes),
+        binding = int(sb.binding),
+        array_stride = int(sb.array_stride),
+      }
+      refl.storage_buffers[i].name = strings.clone_from_cstring(cstring(&sb.name[0]), context.temp_allocator)
+    }
+  }
+
+  return refl
+}
+
 parse_shader_reflection_json :: proc(stage_refl_json: []u8, stage_refl_json_len: int) -> ^api.Shader_Reflection_Data {
   parsed, err := json.parse(stage_refl_json[:stage_refl_json_len], json.DEFAULT_SPECIFICATION, true)
   defer json.destroy_value(parsed)
@@ -1176,7 +1461,6 @@ on_prepare_texture :: proc "c" (params: ^api.Asset_Load_Params, mb: ^memio.Mem_B
   context = runtime.default_context()
   context.allocator = gfx_alloc
 
-  fmt.println("in on_prepare_texture")
   res := new(api.Texture)
 
   info := &res.info
@@ -1198,7 +1482,7 @@ on_prepare_texture :: proc "c" (params: ^api.Asset_Load_Params, mb: ^memio.Mem_B
     info.mips = mipcnt
     info.bpp = is_16_bit ? 16 : 32
   } else {
-    fmt.println("reading image matadata failed")
+    fmt.println("reading image metadata failed")
     mem.zero(info, size_of(api.Texture_Info))
   }
 
@@ -1314,8 +1598,6 @@ on_load_texture :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load
     }
   }
 
-  fmt.println("finished loading texture!")
-
   return true
 }
 
@@ -1323,8 +1605,6 @@ on_load_texture :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load
 on_finalize_texture :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
   context = runtime.default_context()
   context.allocator = gfx_alloc
-  
-  fmt.println("finalizing texture!!!")
 
   tex := cast(^api.Texture)data.obj.ptr
   desc := cast(^sokol.sg_image_desc)data.user1
@@ -1335,8 +1615,6 @@ on_finalize_texture :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_
   
   free(cast(rawptr)desc.data.subimage[0][0].ptr)
   free(data.user1)
-
-  fmt.println("Initialized image!!!!!!")
 }
 
 
@@ -1355,12 +1633,123 @@ on_release_texture :: proc "c" (obj: api.Asset_Object) {
   fmt.println("in on_release_texture")
 }
 
-on_prepare_shader :: proc "c" (params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) -> api.Asset_Load_Data {
+Shader_Setup_Stage_Desc :: struct {
+  refl : ^api.Shader_Reflection_Data,
+  code: rawptr,
+  code_size: i32,
+}
+
+setup_compute_shader_desc :: proc(desc: ^sokol.sg_shader_desc, cs_refl: ^api.Shader_Reflection_Data, cs: rawptr, cs_size: i32, name_hdl: ^u32) -> ^sokol.sg_shader_desc {
+  num_stages := 1
+  stages := [1]Shader_Setup_Stage_Desc{
+    {
+      refl = cs_refl,
+      code = cs,
+      code_size = cs_size,
+    },
+  }
+
+  if name_hdl != nil {
+    desc.label = strings.clone_to_cstring(cs_refl.source_file, context.temp_allocator)
+  }
+
+  for i in 0 ..< num_stages {
+    stage := &stages[i]
+    stage_desc : ^sokol.sg_shader_stage_desc = nil
+    #partial switch stage.refl.stage {
+      case .CS: {
+        stage_desc = &desc.cs
+        stage_desc.d3d11_target = "cs_5_0"
+      }
+      case: {
+        assert(false, "not implemented")
+      }
+    }
+
+    if stage.refl.code_type == .Bytecode {
+      stage_desc.bytecode.size = uint(stage.code_size)
+      stage_desc.bytecode.ptr = stage.code
+    } else if stage.refl.code_type == .Source {
+      stage_desc.source = transmute(cstring)stage.code
+    }
+  } 
+
+  return desc
+}
+
+get_sgs_chunk_at_offset :: proc(reader: ^bytes.Reader, size: i64, fourcc: u32) -> Sgs_Chunk_Private_Data {
+  end := size > 0 ? min(reader.i + size, bytes.reader_size(reader)) : bytes.reader_size(reader)
+  end -= 8
+  if reader.i >= end {
+    return { pos = -1 }
+  }
+
+  ch := (cast(^u32)(&reader.s[reader.i]))^
+  if ch == fourcc {
+    reader.i += size_of(u32)
+    chunk_size : u32
+    io.read_ptr(io.to_reader(bytes.reader_to_stream(reader)), &chunk_size, size_of(chunk_size))
+    return { pos = reader.i, size = chunk_size }
+  }
+
+  for offset in reader.i ..< end {
+    ch := (cast(^u32)(&reader.s[offset]))^
+    if ch == fourcc {
+      reader.i = offset + size_of(u32)
+      chunk_size: u32
+      io.read_ptr(io.to_reader(bytes.reader_to_stream(reader)), &chunk_size, size_of(chunk_size))
+      return { pos = reader.i, size = chunk_size }
+    }
+  }
+
+  return { pos = -1 }
+}
+
+on_prepare_shader :: proc "c" (params: ^api.Asset_Load_Params, mb: ^memio.Mem_Block) -> api.Asset_Load_Data {
   context = runtime.default_context()
   context.allocator = gfx_alloc
+
+  shader := new(api.Shader)
+  info := &shader.info
   
-  fmt.println("Inside on prepare shader!")
-  return {}
+  byte_reader : bytes.Reader
+  bytes.reader_init(&byte_reader, mem.byte_slice(mb.data, int(mb.size)))
+  reader, _ := io.to_reader(bytes.reader_to_stream(&byte_reader))
+
+  sgs : u32
+  io.read_ptr(reader, &sgs, size_of(sgs))
+  if sgs != SGS_CHUNK {
+    assert(false, "invalid .sgs file")
+    return { obj = {  } }
+  }
+  io.seek(io.to_seeker(reader.stream), size_of(u32), .Current)
+
+  sinfo : Sgs_Chunk
+  io.read_ptr(reader, &sinfo, size_of(sinfo))
+
+  stage_chunk := get_sgs_chunk_at_offset(&byte_reader, 0, SGS_CHUNK_STAGE)
+  
+  for stage_chunk.pos != -1 {
+    stage_type : u32
+    io.read_ptr(reader, &stage_type, size_of(stage_type))
+
+    if stage_type == SGS_STAGE_VERTEX {
+      reflect_chunk := get_sgs_chunk_at_offset(&byte_reader, i64(stage_chunk.size), SGS_CHUNK_REFL)
+      if reflect_chunk.pos != -1 {
+        refl := parse_shader_reflection_binary(&byte_reader.s[reflect_chunk.pos], reflect_chunk.size)
+        mem.copy(&info.inputs[0], &refl.inputs[0], size_of(api.Shader_Input_Reflection_Data) * len(refl.inputs))
+        info.num_inputs = len(refl.inputs)
+      }
+    }
+
+    io.seek(io.to_seeker(reader.stream), stage_chunk.pos + i64(stage_chunk.size), .Start)
+    stage_chunk = get_sgs_chunk_at_offset(&byte_reader, 0, SGS_CHUNK_STAGE)
+  }
+
+  shader.shd = private.gfx_api.alloc_shader()
+  assert(shader.shd.id != 0)
+
+  return { obj = { ptr = shader } }
 }
 
 
@@ -1369,8 +1758,95 @@ on_load_shader :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_
 }
 
 
-on_finalize_shader :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mem: ^memio.Mem_Block) {
+on_finalize_shader :: proc "c" (data: ^api.Asset_Load_Data, params: ^api.Asset_Load_Params, mb: ^memio.Mem_Block) {
+  context = runtime.default_context()
+  context.allocator = gfx_alloc
 
+  shader_desc : sokol.sg_shader_desc
+
+  vs_refl, fs_refl, cs_refl: ^api.Shader_Reflection_Data
+  vs_data, fs_data, cs_data : ^u8
+  vs_size, fs_size, cs_size : i32
+
+  byte_reader : bytes.Reader
+  bytes.reader_init(&byte_reader, mem.byte_slice(mb.data, int(mb.size)))
+  reader, _ := io.to_reader(bytes.reader_to_stream(&byte_reader))
+
+  sgs : u32
+  io.read_ptr(reader, &sgs, size_of(sgs))
+  if sgs != SGS_CHUNK {
+    assert(false, "invalid .sgs file")
+    return
+  }
+  io.seek(io.to_seeker(reader.stream), size_of(u32), .Current)
+
+  sinfo : Sgs_Chunk
+  io.read_ptr(reader, &sinfo, size_of(sinfo))
+
+  stage_chunk := get_sgs_chunk_at_offset(&byte_reader, 0, SGS_CHUNK_STAGE)
+  
+  for stage_chunk.pos != -1 {
+    stage_type : u32
+    io.read_ptr(reader, &stage_type, size_of(stage_type))
+
+    code_type : api.Shader_Code_Type = .Source
+    stage : api.Shader_Stage
+
+    code_chunk := get_sgs_chunk_at_offset(&byte_reader, i64(stage_chunk.size), SGS_CHUNK_CODE)
+    if code_chunk.pos == -1 {
+      code_chunk = get_sgs_chunk_at_offset(&byte_reader, i64(stage_chunk.size), SGS_CHUNK_DATA)
+      if code_chunk.pos == -1 {
+        assert(false, "shader binary missing code and data chunks")
+        return
+      }
+      code_type = .Bytecode
+    }
+
+    if stage_type == SGS_STAGE_VERTEX {
+      vs_data = &byte_reader.s[code_chunk.pos]
+      vs_size = i32(code_chunk.size)
+      stage = .VS
+    }
+    else if stage_type == SGS_STAGE_FRAGMENT {
+      fs_data = &byte_reader.s[code_chunk.pos]
+      fs_size = i32(code_chunk.size)
+      stage = .FS
+    }
+    else if stage_type == SGS_STAGE_COMPUTE {
+      cs_data = &byte_reader.s[code_chunk.pos]
+      cs_size = i32(code_chunk.size)
+      stage = .CS
+    } else {
+      assert(false, "shader stage not implemented")
+    }
+
+    io.seek(io.to_seeker(reader.stream), i64(code_chunk.size), .Current)
+    reflect_chunk := get_sgs_chunk_at_offset(&byte_reader, i64(stage_chunk.size - code_chunk.size), SGS_CHUNK_REFL)
+    if reflect_chunk.pos != -1 {
+      refl := parse_shader_reflection_binary(&byte_reader.s[reflect_chunk.pos], reflect_chunk.size)
+      refl.lang = fourcc_to_shader_lang(sinfo.lang)
+      refl.stage = stage
+      refl.profile_version = int(sinfo.profile_ver)
+      refl.code_type = code_type
+
+      if stage_type == SGS_STAGE_VERTEX {
+        vs_refl = refl
+      } else if stage_type == SGS_STAGE_FRAGMENT {
+        fs_refl = refl
+      } else if stage_type == SGS_STAGE_COMPUTE {
+        cs_refl = refl
+      }
+
+      io.seek(io.to_seeker(reader.stream), i64(reflect_chunk.size), .Current)
+    }
+
+    io.seek(io.to_seeker(reader.stream), stage_chunk.pos + i64(stage_chunk.size), .Start)
+    stage_chunk = get_sgs_chunk_at_offset(&byte_reader, 0, SGS_CHUNK_STAGE)
+  }
+
+  if cs_refl != nil && cs_data != nil {
+    setup_compute_shader_desc(&shader_desc, cs_refl, cs_data, cs_size, nil)
+  }
 }
 
 
@@ -1634,7 +2110,6 @@ init_gfx_api :: proc() {
     imm = {
       begin = begin_imm_stage,
       end = end_imm_stage,
-      update_buffer = sokol.sg_update_buffer,
       update_image = sokol.sg_update_image,
       begin_default_pass = sokol.sg_begin_default_pass,
       begin_pass = sokol.sg_begin_pass,
@@ -1645,6 +2120,7 @@ init_gfx_api :: proc() {
       apply_uniforms = proc "c" (stage: sokol.sg_shader_stage, ub_index: i32, data: rawptr, num_bytes: i32) { sokol.sg_apply_uniforms(stage, ub_index, &{ data, uint(num_bytes) }) },
       draw = sokol.sg_draw,
       end_pass = sokol.sg_end_pass,
+      update_buffer = proc "c" (buffer: sokol.sg_buffer, data: rawptr, num_bytes: i32) { sokol.sg_update_buffer(buffer, &{ data, uint(num_bytes) }) },
       append_buffer = proc "c" (buffer: sokol.sg_buffer, data: rawptr, num_bytes: i32) -> i32 { return sokol.sg_append_buffer(buffer, &{ data, uint(num_bytes) }) },
     },
     staged = {
@@ -1657,6 +2133,7 @@ init_gfx_api :: proc() {
       apply_uniforms = apply_cb_uniforms,
       draw = cb_draw,
       end_pass = end_cb_pass,
+      update_buffer = update_cb_buffer,
       append_buffer = append_cb_buffer,
     },
     make_buffer = make_buffer,
@@ -1673,6 +2150,7 @@ init_gfx_api :: proc() {
     register_stage = register_stage,
     bind_shader_to_pipeline = bind_shader_to_pipeline,
     alloc_image = sokol.sg_alloc_image,
+    alloc_shader = sokol.sg_alloc_shader,
     texture_white = texture_white,
     texture_black = texture_black,
   }
